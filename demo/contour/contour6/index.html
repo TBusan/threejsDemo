@@ -55,6 +55,8 @@
         import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
         import { DRACOLoader } from 'three/addons/loaders/DRACOLoader.js';
 
+        import * as d3 from 'https://cdn.jsdelivr.net/npm/d3@7/+esm';
+
         let camera, scene, renderer, controls;
         const container = document.getElementById('container');
 
@@ -62,292 +64,119 @@
             constructor(data) {
                 this.data = data[0];
                 this.group = new THREE.Group();
-                this.smoothing = this.data.line?.smoothing || 0;
-                this.showFill = this.data.contours?.coloring !== 'lines';
-                this.width = Math.abs(this.data.x[this.data.x.length - 1] - this.data.x[0]);
-                this.height = Math.abs(this.data.y[this.data.y.length - 1] - this.data.y[0]);
                 this.createPlot();
             }
 
             createPlot() {
-                if (this.showFill) {
-                    this.createGradientLayer();
-                }
                 this.createContourLines();
                 this.createGrid();
                 this.createAxes();
-                
-                // 调整整个图的位置
-                this.group.position.set(-this.width/2, -this.height/2, 0);
             }
 
             createContourLines() {
-                const contours = this.generateContours();
-                
-                // 使用渐变色方案，从蓝到绿到红
-                contours.forEach((points, index) => {
-                    const geometry = new THREE.BufferGeometry().setFromPoints(points);
-                    // 根据等值线的值来确定颜色
-                    const value = this.levels[index];
-                    const normalizedValue = (value - this.minValue) / (this.maxValue - this.minValue);
-                    
-                    let color;
-                    if (normalizedValue < 0.5) {
-                        color = new THREE.Color().setHSL(0.6, 1, 0.5); // 蓝色
-                    } else if (normalizedValue < 0.75) {
-                        color = new THREE.Color().setHSL(0.3, 1, 0.5); // 绿色
-                    } else {
-                        color = new THREE.Color().setHSL(0.0, 1, 0.5); // 红色
-                    }
-
-                    const material = new THREE.LineBasicMaterial({
-                        color: color,
-                        linewidth: 1,
-                        opacity: 1,
-                        transparent: false
-                    });
-                    const line = new THREE.Line(geometry, material);
-                    this.group.add(line);
-                });
-            }
-
-            generateContours() {
+                // 使用 d3 的 contour 生成器
                 const values = this.data.v;
                 const width = values[0].length;
                 const height = values.length;
+                const flatValues = values.flat();
+
+                // 创建 d3 contour 生成器
+                const contours = d3.contours()
+                    .size([width, height])
+                    .thresholds(15) // 设置等值线数量
+                    (flatValues);
+
+                // 创建坐标映射函数
+                const xScale = d3.scaleLinear()
+                    .domain([0, width - 1])
+                    .range([this.data.x[0], this.data.x[this.data.x.length - 1]]);
+
+                const yScale = d3.scaleLinear()
+                    .domain([0, height - 1])
+                    .range([this.data.y[0], this.data.y[this.data.y.length - 1]]);
+
+                // 转换每个等值线
+                contours.forEach((contour, index) => {
+                    const paths = contour.coordinates;
+                    const value = contour.value;
+                    
+                    // 为每个路径创建一个 THREE.Line
+                    paths.forEach(path => {
+                        path.forEach(ring => {
+                            const points = ring.map(point => {
+                                return new THREE.Vector3(
+                                    xScale(point[0]),
+                                    yScale(point[1]),
+                                    0
+                                );
+                            });
+                            
+                            // 闭合路径
+                            if (points.length > 0) {
+                                points.push(points[0].clone());
+                            }
+
+                            const geometry = new THREE.BufferGeometry().setFromPoints(points);
+                            
+                            // 根据值设置颜色
+                            const normalizedValue = (value - d3.min(flatValues)) / 
+                                                 (d3.max(flatValues) - d3.min(flatValues));
+                            const color = this.getContourColor(normalizedValue);
+                            
+                            const material = new THREE.LineBasicMaterial({
+                                color: color,
+                                linewidth: 1
+                            });
+
+                            const line = new THREE.Line(geometry, material);
+                            this.group.add(line);
+                        });
+                    });
+                });
+            }
+
+            getContourColor(normalizedValue) {
+                // 使用 d3 的颜色比例尺
+                const colorScale = d3.scaleSequential(d3.interpolateRdYlBu)
+                    .domain([1, 0]); // 反转域以匹配 plotly 的颜色方案
                 
-                // 计算数据范围
-                this.minValue = Infinity;
-                this.maxValue = -Infinity;
-                for (let i = 0; i < height; i++) {
-                    for (let j = 0; j < width; j++) {
-                        const val = values[i][j];
-                        if (isFinite(val)) {
-                            this.minValue = Math.min(this.minValue, val);
-                            this.maxValue = Math.max(this.maxValue, val);
-                        }
-                    }
-                }
+                return new THREE.Color(colorScale(normalizedValue));
+            }
 
-                // 生成更密集的等值线级别
-                this.levels = [];
-                const levelCount = 25; // 增加等值线数量
-                const step = (this.maxValue - this.minValue) / (levelCount - 1);
-                for (let i = 0; i < levelCount; i++) {
-                    this.levels.push(this.minValue + step * i);
-                }
+            createGrid() {
+                const xMin = this.data.x[0];
+                const xMax = this.data.x[this.data.x.length - 1];
+                const yMin = this.data.y[0];
+                const yMax = this.data.y[this.data.y.length - 1];
 
-                const contours = [];
-                this.levels.forEach(level => {
-                    const levelContours = this.traceContourLevel(level);
-                    if (levelContours.length > 0) {
-                        contours.push(...levelContours);
-                    }
+                // 创建网格线
+                const gridMaterial = new THREE.LineBasicMaterial({
+                    color: 0xcccccc,
+                    opacity: 0.5,
+                    transparent: true
                 });
 
-                return contours;
-            }
-
-            traceContourLevel(level) {
-                const contours = [];
-                const visited = new Set();
-                const width = this.data.v[0].length;
-                const height = this.data.v.length;
-
-                // 扫描所有单元格寻找起始点
-                for (let y = 0; y < height - 1; y++) {
-                    for (let x = 0; x < width - 1; x++) {
-                        if (visited.has(`${x},${y}`)) continue;
-
-                        const contour = this.traceContour(x, y, level, visited);
-                        if (contour && contour.length > 2) {
-                            contours.push(contour);
-                        }
-                    }
+                // X 方向网格线
+                for (let x of this.data.x) {
+                    const points = [
+                        new THREE.Vector3(x, yMin, 0),
+                        new THREE.Vector3(x, yMax, 0)
+                    ];
+                    const geometry = new THREE.BufferGeometry().setFromPoints(points);
+                    const line = new THREE.Line(geometry, gridMaterial);
+                    this.group.add(line);
                 }
 
-                return contours;
-            }
-
-            traceContour(startX, startY, level, visited) {
-                const points = [];
-                let x = startX, y = startY;
-                const eps = 1e-6;
-
-                while (true) {
-                    const key = `${x},${y}`;
-                    if (visited.has(key)) break;
-                    visited.add(key);
-
-                    const cellPoints = this.getCellContourPoints(x, y, level);
-                    if (!cellPoints || cellPoints.length !== 2) break;
-
-                    if (points.length === 0) {
-                        points.push(...cellPoints);
-                    } else {
-                        const lastPoint = points[points.length - 1];
-                        // 使用更精确的点连接策略
-                        if (lastPoint.distanceTo(cellPoints[0]) < eps) {
-                            points.push(cellPoints[1]);
-                        } else if (lastPoint.distanceTo(cellPoints[1]) < eps) {
-                            points.push(cellPoints[0]);
-                        } else {
-                            // 如果没有直接连接的点，尝试插值连接
-                            const midPoint = new THREE.Vector3().addVectors(lastPoint, cellPoints[0]).multiplyScalar(0.5);
-                            points.push(midPoint, cellPoints[0], cellPoints[1]);
-                        }
-                    }
-
-                    const nextCell = this.findNextCell(x, y, points[points.length - 1]);
-                    if (!nextCell) break;
-                    x = nextCell.x;
-                    y = nextCell.y;
+                // Y 方向网格线
+                for (let y of this.data.y) {
+                    const points = [
+                        new THREE.Vector3(xMin, y, 0),
+                        new THREE.Vector3(xMax, y, 0)
+                    ];
+                    const geometry = new THREE.BufferGeometry().setFromPoints(points);
+                    const line = new THREE.Line(geometry, gridMaterial);
+                    this.group.add(line);
                 }
-
-                // 对生成的点进行平滑处理
-                return this.smoothPoints(points);
-            }
-
-            findNextCell(x, y, endPoint) {
-                const eps = 0.0001;
-                const cells = [
-                    {x: x+1, y: y},
-                    {x: x, y: y+1},
-                    {x: x-1, y: y},
-                    {x: x, y: y-1}
-                ];
-
-                for (const cell of cells) {
-                    if (!this.isValidCell(cell.x, cell.y)) continue;
-
-                    const x0 = this.data.x[cell.x];
-                    const x1 = this.data.x[cell.x + 1];
-                    const y0 = this.data.y[cell.y];
-                    const y1 = this.data.y[cell.y + 1];
-
-                    // 检查端点是否在单元格边界上
-                    if (Math.abs(endPoint.x - x0) < eps && endPoint.y >= y0 && endPoint.y <= y1) {
-                        return cell;
-                    }
-                    if (Math.abs(endPoint.x - x1) < eps && endPoint.y >= y0 && endPoint.y <= y1) {
-                        return cell;
-                    }
-                    if (Math.abs(endPoint.y - y0) < eps && endPoint.x >= x0 && endPoint.x <= x1) {
-                        return cell;
-                    }
-                    if (Math.abs(endPoint.y - y1) < eps && endPoint.x >= x0 && endPoint.x <= x1) {
-                        return cell;
-                    }
-                }
-
-                return null;
-            }
-
-            getCellContourPoints(x, y, level) {
-                const v00 = this.data.v[y][x];
-                const v10 = this.data.v[y][x + 1];
-                const v11 = this.data.v[y + 1][x + 1];
-                const v01 = this.data.v[y + 1][x];
-
-                if (!isFinite(v00) || !isFinite(v10) || !isFinite(v11) || !isFinite(v01)) {
-                    return null;
-                }
-
-                const x0 = this.data.x[x];
-                const x1 = this.data.x[x + 1];
-                const y0 = this.data.y[y];
-                const y1 = this.data.y[y + 1];
-
-                let caseIndex = 0;
-                if (v00 > level) caseIndex |= 1;
-                if (v10 > level) caseIndex |= 2;
-                if (v11 > level) caseIndex |= 4;
-                if (v01 > level) caseIndex |= 8;
-
-                const points = [];
-                const interpolate = (v1, v2, p1, p2) => {
-                    const t = (level - v1) / (v2 - v1);
-                    return new THREE.Vector3(
-                        p1.x + t * (p2.x - p1.x),
-                        p1.y + t * (p2.y - p1.y),
-                        0
-                    );
-                };
-
-                // 完整的 Marching Squares 查找表
-                switch (caseIndex) {
-                    case 0: case 15:
-                        // 无等值线
-                        break;
-                    case 1: case 14:
-                        points.push(
-                            interpolate(v00, v10, new THREE.Vector3(x0, y0, 0), new THREE.Vector3(x1, y0, 0)),
-                            interpolate(v00, v01, new THREE.Vector3(x0, y0, 0), new THREE.Vector3(x0, y1, 0))
-                        );
-                        break;
-                    case 2: case 13:
-                        points.push(
-                            interpolate(v00, v10, new THREE.Vector3(x0, y0, 0), new THREE.Vector3(x1, y0, 0)),
-                            interpolate(v10, v11, new THREE.Vector3(x1, y0, 0), new THREE.Vector3(x1, y1, 0))
-                        );
-                        break;
-                    case 3: case 12:
-                        points.push(
-                            interpolate(v00, v01, new THREE.Vector3(x0, y0, 0), new THREE.Vector3(x0, y1, 0)),
-                            interpolate(v10, v11, new THREE.Vector3(x1, y0, 0), new THREE.Vector3(x1, y1, 0))
-                        );
-                        break;
-                    case 4: case 11:
-                        points.push(
-                            interpolate(v10, v11, new THREE.Vector3(x1, y0, 0), new THREE.Vector3(x1, y1, 0)),
-                            interpolate(v01, v11, new THREE.Vector3(x0, y1, 0), new THREE.Vector3(x1, y1, 0))
-                        );
-                        break;
-                    case 5:
-                        // 鞍点情况，需要检查中心点
-                        const vCenter = (v00 + v10 + v11 + v01) / 4;
-                        if (vCenter > level) {
-                            points.push(
-                                interpolate(v00, v10, new THREE.Vector3(x0, y0, 0), new THREE.Vector3(x1, y0, 0)),
-                                interpolate(v01, v11, new THREE.Vector3(x0, y1, 0), new THREE.Vector3(x1, y1, 0))
-                            );
-                        } else {
-                            points.push(
-                                interpolate(v00, v01, new THREE.Vector3(x0, y0, 0), new THREE.Vector3(x0, y1, 0)),
-                                interpolate(v10, v11, new THREE.Vector3(x1, y0, 0), new THREE.Vector3(x1, y1, 0))
-                            );
-                        }
-                        break;
-                    case 6: case 9:
-                        points.push(
-                            interpolate(v00, v10, new THREE.Vector3(x0, y0, 0), new THREE.Vector3(x1, y0, 0)),
-                            interpolate(v01, v11, new THREE.Vector3(x0, y1, 0), new THREE.Vector3(x1, y1, 0))
-                        );
-                        break;
-                    case 7: case 8:
-                        points.push(
-                            interpolate(v01, v11, new THREE.Vector3(x0, y1, 0), new THREE.Vector3(x1, y1, 0)),
-                            interpolate(v00, v01, new THREE.Vector3(x0, y0, 0), new THREE.Vector3(x0, y1, 0))
-                        );
-                        break;
-                    case 10:
-                        // 另一个鞍点情况
-                        const vCenter2 = (v00 + v10 + v11 + v01) / 4;
-                        if (vCenter2 > level) {
-                            points.push(
-                                interpolate(v00, v01, new THREE.Vector3(x0, y0, 0), new THREE.Vector3(x0, y1, 0)),
-                                interpolate(v10, v11, new THREE.Vector3(x1, y0, 0), new THREE.Vector3(x1, y1, 0))
-                            );
-                        } else {
-                            points.push(
-                                interpolate(v00, v10, new THREE.Vector3(x0, y0, 0), new THREE.Vector3(x1, y0, 0)),
-                                interpolate(v01, v11, new THREE.Vector3(x0, y1, 0), new THREE.Vector3(x1, y1, 0))
-                            );
-                        }
-                        break;
-                }
-
-                return points;
             }
 
             createAxes() {
@@ -406,22 +235,6 @@
                     const label = this.createAxisLabel(value.toFixed(1), position, axisType);
                     group.add(label);
                 });
-            }
-
-            createGrid() {
-                const gridHelper = new THREE.GridHelper(
-                    Math.max(this.width, this.height),
-                    10,
-                    0xcccccc,
-                    0xcccccc
-                );
-                gridHelper.rotation.x = Math.PI / 2;
-                gridHelper.position.set(
-                    (this.data.x[0] + this.data.x[this.data.x.length - 1]) / 2,
-                    (this.data.y[0] + this.data.y[this.data.y.length - 1]) / 2,
-                    -0.1
-                );
-                this.group.add(gridHelper);
             }
 
             createAxisLabel(text, position, axisType) {
@@ -498,25 +311,31 @@
             scene = new THREE.Scene();
             scene.background = new THREE.Color(0xffffff);
 
-            // 调整相机位置和视角
+            // 使用正交相机以保持比例
+            const width = container.clientWidth;
+            const height = container.clientHeight;
+            const aspect = width / height;
+            const frustumSize = 10;
+
             camera = new THREE.OrthographicCamera(
-                -10, 10,
-                10, -10,
-                0.1, 1000
+                frustumSize * aspect / -2,
+                frustumSize * aspect / 2,
+                frustumSize / 2,
+                frustumSize / -2,
+                0.1,
+                1000
             );
             camera.position.set(0, 0, 50);
-            camera.lookAt(0, 0, 0);
 
-            renderer = new THREE.WebGLRenderer({ 
+            renderer = new THREE.WebGLRenderer({
                 antialias: true,
                 preserveDrawingBuffer: true
             });
-            renderer.setPixelRatio(window.devicePixelRatio);
-            renderer.setSize(container.clientWidth, container.clientHeight);
+            renderer.setSize(width, height);
             container.appendChild(renderer.domElement);
 
             controls = new OrbitControls(camera, renderer.domElement);
-            controls.enableRotate = false; // 禁用旋转
+            controls.enableRotate = false;
             controls.enableZoom = true;
             controls.enablePan = true;
 
