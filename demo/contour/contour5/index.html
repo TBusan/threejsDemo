@@ -66,7 +66,7 @@
 
             // 相机设置
             camera = new THREE.PerspectiveCamera(75, container.clientWidth / container.clientHeight, 0.1, 1000);
-            camera.position.set(0, 0, 20);
+            camera.position.set(0, 0, 50);
 
             // 渲染器设置
             renderer = new THREE.WebGLRenderer({ antialias: true });
@@ -81,6 +81,14 @@
             // 创建等值线
             createContourPlot();
 
+            // 添加网格
+            const gridHelper = createGrid();
+            scene.add(gridHelper);
+
+            // 添加坐标轴
+            const axesHelper = createAxes();
+            scene.add(axesHelper);
+
             // 窗口大小调整
             window.addEventListener('resize', onWindowResize);
         }
@@ -89,6 +97,7 @@
             const width = 200;
             const height = 200;
             const data = generateData(width, height);
+            console.log("模拟的数据",data);
             const levels = generateLevels(15);
 
             // 首先创建渐变背景
@@ -274,6 +283,85 @@
             requestAnimationFrame(animate);
             controls.update();
             renderer.render(scene, camera);
+        }
+
+        // 添加创建网格的函数
+        function createGrid() {
+            const gridSize = 60;
+            const gridDivisions = 12; // 每个轴上的分割数
+            const gridHelper = new THREE.GridHelper(gridSize, gridDivisions, 0x888888, 0xcccccc);
+            gridHelper.rotation.x = Math.PI / 2; // 旋转到XY平面
+            gridHelper.position.z = -0.2; // 放在等值线后面
+            gridHelper.material.opacity = 0.2;
+            gridHelper.material.transparent = true;
+            return gridHelper;
+        }
+
+        // 添加创建坐标轴的函数
+        function createAxes() {
+            const axesGroup = new THREE.Group();
+
+            // 创建坐标轴线
+            const axesHelper = new THREE.AxesHelper(30);
+            axesHelper.position.set(-30, -30, 0);
+            axesGroup.add(axesHelper);
+
+            // 创建刻度和标签
+            const divisions = 6; // 每个轴上的刻度数
+            const size = 60; // 轴的总长度
+            const step = size / divisions;
+
+            // 创建刻度标签的函数
+            function createLabel(text, position) {
+                const canvas = document.createElement('canvas');
+                const context = canvas.getContext('2d');
+                canvas.width = 64;
+                canvas.height = 32;
+                context.fillStyle = 'black';
+                context.font = '24px Arial';
+                context.textAlign = 'center';
+                context.textBaseline = 'middle';
+                context.fillText(text, canvas.width/2, canvas.height/2);
+
+                const texture = new THREE.CanvasTexture(canvas);
+                const material = new THREE.SpriteMaterial({ map: texture });
+                const sprite = new THREE.Sprite(material);
+                sprite.position.copy(position);
+                sprite.scale.set(2, 1, 1);
+                return sprite;
+            }
+
+            // 添加X轴刻度和标签
+            for (let i = 0; i <= divisions; i++) {
+                const x = -30 + i * step;
+                // 刻度线
+                const tickGeometry = new THREE.BufferGeometry().setFromPoints([
+                    new THREE.Vector3(x, -30, 0),
+                    new THREE.Vector3(x, -30.5, 0)
+                ]);
+                const tickLine = new THREE.Line(tickGeometry, new THREE.LineBasicMaterial({ color: 0x000000 }));
+                axesGroup.add(tickLine);
+                // 标签
+                const label = createLabel(i * 10, new THREE.Vector3(x, -32, 0));
+                axesGroup.add(label);
+            }
+
+            // 添加Y轴刻度和标签
+            for (let i = 0; i <= divisions; i++) {
+                const y = -30 + i * step;
+                // 刻度线
+                const tickGeometry = new THREE.BufferGeometry().setFromPoints([
+                    new THREE.Vector3(-30, y, 0),
+                    new THREE.Vector3(-30.5, y, 0)
+                ]);
+                const tickLine = new THREE.Line(tickGeometry, new THREE.LineBasicMaterial({ color: 0x000000 }));
+                axesGroup.add(tickLine);
+                // 标签
+                const label = createLabel(i * 10, new THREE.Vector3(-32, y, 0));
+                axesGroup.add(label);
+            }
+
+            return axesGroup;
         }
 
     </script>
