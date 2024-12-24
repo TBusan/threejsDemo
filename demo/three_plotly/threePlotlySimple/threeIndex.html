@@ -17,9 +17,9 @@
         }
         .plotly-container {
             position: absolute;
-            top: 0;
-            left: 0;
-            opacity: 0;
+            top: -9999px;
+            left: -9999px;
+            pointer-events: none;
         }
     </style>
     <script src="https://cdn.plot.ly/plotly-2.27.0.min.js"></script>
@@ -240,8 +240,6 @@
                     });
                     console.log('Plotly render complete');
 
-                    // 临时显示 Plotly 容器以确保正确捕获
-                    this.plotlyContainer.style.opacity = '1';
                     await new Promise(resolve => setTimeout(resolve, 1000));
 
                     console.log('Starting html2canvas');
@@ -259,8 +257,6 @@
                     console.log('Texture updated');
 
                     // 清理 Plotly 容器
-                    this.plotlyContainer.style.opacity = '0';
-                    await new Promise(resolve => setTimeout(resolve, 100));
                     document.body.removeChild(this.plotlyContainer);
                     this.plotlyContainer = null;
 
