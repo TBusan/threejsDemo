@@ -1,0 +1,221 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <title>Three.js Plotly Contour</title>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, user-scalable=no, minimum-scale=1.0, maximum-scale=1.0">
+    <style>
+        body { margin: 0; }
+        #container { width: 1000px; height: 1000px; }
+        #plotly-temp { 
+            position: absolute; 
+            top: 0; 
+            left: 0; 
+            visibility: visible;
+            opacity: 0.5;
+        }
+    </style>
+    <script src="https://cdn.plot.ly/plotly-2.27.0.min.js"></script>
+    <script src="https://html2canvas.hertzen.com/dist/html2canvas.min.js"></script>
+</head>
+
+<body>
+    <div id="container"></div>
+    <div id="plotly-temp"></div>
+
+    <script type="importmap">
+        {
+            "imports": {
+                "three": "../../../build/three.module.js",
+                "three/addons/": "../../../examples/jsm/"
+            }
+        }
+    </script>
+
+    <script type="module">
+        import * as THREE from 'three';
+        import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+
+        class ContourViewer {
+            constructor(container) {
+                this.container = container;
+                this.width = container.clientWidth;
+                this.height = container.clientHeight;
+                this.aspectRatio = this.width / this.height;
+                
+                this.init();
+                this.setupResizeHandler();
+            }
+
+            init() {
+                this.scene = new THREE.Scene();
+                this.scene.background = new THREE.Color(0xffffff);
+
+                this.initCamera();
+                this.initRenderer();
+                this.initControls();
+                this.createMesh();
+                this.animate();
+            }
+
+            initCamera() {
+                const frustumSize = 10;
+                const aspect = this.width / this.height;
+                this.camera = new THREE.OrthographicCamera(
+                    -frustumSize * aspect / 2,
+                    frustumSize * aspect / 2,
+                    frustumSize / 2,
+                    -frustumSize / 2,
+                    0.1, 1000
+                );
+                this.camera.position.z = 5;
+            }
+
+            initRenderer() {
+                this.renderer = new THREE.WebGLRenderer({ 
+                    antialias: true,
+                    preserveDrawingBuffer: true 
+                });
+                this.renderer.setSize(this.width, this.height);
+                this.container.appendChild(this.renderer.domElement);
+            }
+
+            initControls() {
+                this.controls = new OrbitControls(this.camera, this.renderer.domElement);
+                this.controls.enableRotate = false;
+                this.controls.enableZoom = true;
+                this.controls.enablePan = true;
+                this.controls.mouseButtons = {
+                    LEFT: THREE.MOUSE.PAN,
+                    MIDDLE: THREE.MOUSE.DOLLY,
+                    RIGHT: THREE.MOUSE.PAN
+                };
+                
+                // 设置缩放限制
+                this.controls.minZoom = 0.1;
+                this.controls.maxZoom = 10;
+
+                // 设置平移限制
+                this.controls.panSpeed = 0.5;
+                this.controls.screenSpacePanning = true;
+            }
+
+            createMesh() {
+                const geometry = new THREE.PlaneGeometry(10 * this.aspectRatio, 10);
+                const material = new THREE.MeshBasicMaterial({
+                    color: 0xffffff,
+                    side: THREE.DoubleSide,
+                    transparent: true,
+                    opacity: 1
+                });
+                this.mesh = new THREE.Mesh(geometry, material);
+                this.scene.add(this.mesh);
+            }
+
+            updateTexture(canvas) {
+                const texture = new THREE.CanvasTexture(canvas);
+                texture.needsUpdate = true;
+
+                // 更新材质，保持纵横比
+                this.mesh.material = new THREE.MeshBasicMaterial({
+                    map: texture,
+                    side: THREE.DoubleSide,
+                    transparent: true,
+                    opacity: 1
+                });
+            }
+
+            setupResizeHandler() {
+                window.addEventListener('resize', () => {
+                    this.width = this.container.clientWidth;
+                    this.height = this.container.clientHeight;
+                    this.aspectRatio = this.width / this.height;
+
+                    // 更新相机
+                    const frustumSize = 10;
+                    this.camera.left = -frustumSize * this.aspectRatio / 2;
+                    this.camera.right = frustumSize * this.aspectRatio / 2;
+                    this.camera.updateProjectionMatrix();
+
+                    // 更新渲染器
+                    this.renderer.setSize(this.width, this.height);
+
+                    // 更新平面几何体
+                    this.mesh.geometry = new THREE.PlaneGeometry(10 * this.aspectRatio, 10);
+                });
+            }
+
+            animate() {
+                requestAnimationFrame(this.animate.bind(this));
+                this.controls.update();
+                this.renderer.render(this.scene, this.camera);
+            }
+        }
+
+        // 创建查看器实例
+        const viewer = new ContourViewer(document.getElementById('container'));
+
+        // Plotly 数据和配置
+        const data = {
+            z: [[2, 4, 7, 12, 13, 14, 15, 16],
+                [3, 1, 6, 11, 12, 13, 16, 17],
+                [4, 2, 7, 7, 11, 14, 17, 18],
+                [5, 3, 8, 8, 13, 15, 18, 19],
+                [7, 4, 10, 9, 16, 18, 20, 19],
+                [9, 10, 5, 27, 23, 21, 21, 21],
+                [11, 14, 17, 26, 25, 24, 23, 22]],
+            x: [0, 1, 2, 3, 4, 5, 6, 7],
+            y: [0, 1, 2, 3, 4, 5, 6]
+        };
+
+        const plotlyData = [{
+            type: 'contour',
+            z: data.z,
+            x: data.x,
+            y: data.y,
+            contours: {
+                coloring: 'fill',
+                showlines: true,
+                showlabels: true,
+                labelfont: { size: 12, color: 'white' }
+            },
+            line: {
+                width: 1,
+                color: 'black'
+            },
+            colorscale: 'Viridis',
+            showscale: false
+        }];
+
+        const layout = {
+            width: viewer.width,
+            height: viewer.height,
+            margin: { t: 0, r: 0, b: 0, l: 0 },
+            xaxis: { range: [0, 7], showgrid: false },
+            yaxis: { range: [0, 6], showgrid: false },
+            paper_bgcolor: 'rgba(0,0,0,0)',
+            plot_bgcolor: 'rgba(0,0,0,0)'
+        };
+
+        // 渲染 Plotly 图表并转换为纹理
+        Plotly.newPlot('plotly-temp', plotlyData, layout, {
+            staticPlot: true
+        }).then(() => {
+            setTimeout(() => {
+                html2canvas(document.getElementById('plotly-temp'), {
+                    backgroundColor: null,
+                    scale: 2
+                }).then(canvas => {
+                    viewer.updateTexture(canvas);
+                    document.getElementById('plotly-temp').style.display = 'none';
+                }).catch(error => {
+                    console.error('Error generating canvas:', error);
+                });
+            }, 1000);
+        });
+    </script>
+
+</body>
+
+</html>
