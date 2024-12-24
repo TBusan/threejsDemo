@@ -85,7 +85,11 @@
                     y: [0, 1, 2, 3, 4, 5, 6]
                 };
 
-                const contourRenderer = new ContourRenderer(data);
+                const contourRenderer = new ContourRenderer(data, {
+                    showLabels: true,
+                    labelSize: 0.5,
+                    labelColor: '#000000'
+                });
                 const contourMesh = contourRenderer.generate();
                 
                 // 调整等值线位置和缩放

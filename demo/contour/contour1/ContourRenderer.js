@@ -1,11 +1,17 @@
 import * as THREE from 'three';
 
 export class ContourRenderer {
-    constructor(data) {
-        this.data = this.interpolateData(data, 4); // 增加4倍密度
+    constructor(data, options = {}) {
+        this.data = this.interpolateData(data, 4);
         this.width = this.data.x.length;
         this.height = this.data.y.length;
         this.group = new THREE.Group();
+        this.options = {
+            showLabels: false,
+            labelSize: 0.3,
+            labelColor: '#000000',
+            ...options
+        };
     }
 
     interpolateData(data, factor) {
@@ -106,7 +112,7 @@ export class ContourRenderer {
                 // 如果单元格内没有等值线，跳过
                 if (cellCode === 0 || cellCode === 15) continue;
 
-                // 计算插值���
+                // 计算插值
                 const points = [];
                 if ((cellCode & 1) !== ((cellCode >> 1) & 1)) {
                     // 上边有交点
@@ -184,6 +190,11 @@ export class ContourRenderer {
 
     createLines(contours) {
         contours.forEach(contour => {
+            // 找出最长的线段作为标注位置
+            let longestSegment = null;
+            let maxLength = 0;
+
+            // 创建所有线段
             contour.segments.forEach(segment => {
                 const points = segment.map(p => new THREE.Vector3(p[0], p[1], 0));
                 const geometry = new THREE.BufferGeometry().setFromPoints(points);
@@ -193,7 +204,75 @@ export class ContourRenderer {
                 });
                 const line = new THREE.Line(geometry, material);
                 this.group.add(line);
+
+                // 计算线段长度
+                const length = Math.hypot(
+                    segment[1][0] - segment[0][0],
+                    segment[1][1] - segment[0][1]
+                );
+                if (length > maxLength) {
+                    maxLength = length;
+                    longestSegment = segment;
+                }
             });
+
+            // 只在最长的线段上添加标签
+            if (this.options.showLabels && longestSegment) {
+                this.addLabel(longestSegment, contour.level);
+            }
         });
+    }
+
+    addLabel(segment, value) {
+        // 计算线段中点
+        const midPoint = [
+            (segment[0][0] + segment[1][0]) / 2,
+            (segment[0][1] + segment[1][1]) / 2
+        ];
+
+        const canvas = document.createElement('canvas');
+        const ctx = canvas.getContext('2d');
+        canvas.width = 128;
+        canvas.height = 64;
+
+        // 设置文本样式
+        ctx.fillStyle = this.options.labelColor;
+        ctx.font = 'bold 28px Arial';  // 稍微减小字体大小
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+
+        // 添加白色背景
+        const text = value.toFixed(1);
+        const textWidth = ctx.measureText(text).width;
+        const padding = 4;
+        
+        ctx.fillStyle = 'white';
+        ctx.fillRect(
+            (canvas.width - textWidth) / 2 - padding,
+            canvas.height / 2 - 14,
+            textWidth + padding * 2,
+            28
+        );
+
+        // 绘制文本
+        ctx.fillStyle = this.options.labelColor;
+        ctx.fillText(text, canvas.width / 2, canvas.height / 2);
+
+        const texture = new THREE.CanvasTexture(canvas);
+        texture.needsUpdate = true;
+
+        const spriteMaterial = new THREE.SpriteMaterial({
+            map: texture,
+            transparent: true,
+            depthTest: false,
+            depthWrite: false
+        });
+
+        const sprite = new THREE.Sprite(spriteMaterial);
+        sprite.position.set(midPoint[0], midPoint[1], 0.1);
+        sprite.scale.set(this.options.labelSize * 0.8, this.options.labelSize * 0.4, 1);  // 稍微减小标签尺寸
+        sprite.renderOrder = 1;
+
+        this.group.add(sprite);
     }
 } 
