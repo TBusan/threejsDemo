@@ -2,10 +2,63 @@ import * as THREE from 'three';
 
 export class ContourRenderer {
     constructor(data) {
-        this.data = data;
-        this.width = data.x.length;
-        this.height = data.y.length;
+        this.data = this.interpolateData(data, 4); // 增加4倍密度
+        this.width = this.data.x.length;
+        this.height = this.data.y.length;
         this.group = new THREE.Group();
+    }
+
+    interpolateData(data, factor) {
+        // 创建更密集的坐标网格
+        const newXCount = (data.x.length - 1) * factor + 1;
+        const newYCount = (data.y.length - 1) * factor + 1;
+        
+        const xStep = (data.x[data.x.length - 1] - data.x[0]) / (newXCount - 1);
+        const yStep = (data.y[data.y.length - 1] - data.y[0]) / (newYCount - 1);
+        
+        // 生成新的坐标数组
+        const newX = Array.from({ length: newXCount }, (_, i) => data.x[0] + i * xStep);
+        const newY = Array.from({ length: newYCount }, (_, i) => data.y[0] + i * yStep);
+        
+        // 生成新的值网格
+        const newZ = Array(newYCount).fill().map(() => Array(newXCount).fill(0));
+        
+        // 对每个新网格点进行双线性插值
+        for (let y = 0; y < newYCount; y++) {
+            for (let x = 0; x < newXCount; x++) {
+                const xPos = data.x[0] + (x * xStep);
+                const yPos = data.y[0] + (y * yStep);
+                
+                // 找到原始网格中的位置
+                const xIndex = (xPos - data.x[0]) / (data.x[1] - data.x[0]);
+                const yIndex = (yPos - data.y[0]) / (data.y[1] - data.y[0]);
+                
+                const x0 = Math.floor(xIndex);
+                const x1 = Math.min(x0 + 1, data.x.length - 1);
+                const y0 = Math.floor(yIndex);
+                const y1 = Math.min(y0 + 1, data.y.length - 1);
+                
+                const xFrac = xIndex - x0;
+                const yFrac = yIndex - y0;
+                
+                // 双线性插值
+                const v00 = data.z[y0][x0];
+                const v10 = data.z[y0][x1];
+                const v01 = data.z[y1][x0];
+                const v11 = data.z[y1][x1];
+                
+                newZ[y][x] = (1 - xFrac) * (1 - yFrac) * v00 +
+                            xFrac * (1 - yFrac) * v10 +
+                            (1 - xFrac) * yFrac * v01 +
+                            xFrac * yFrac * v11;
+            }
+        }
+        
+        return {
+            x: newX,
+            y: newY,
+            z: newZ
+        };
     }
 
     generate() {
@@ -19,8 +72,8 @@ export class ContourRenderer {
         const min = Math.min(...values);
         const max = Math.max(...values);
         
-        // 生成等值线级别
-        const count = 10;
+        // 增加等值线数量
+        const count = 20; // 增加等值线数量
         const step = (max - min) / count;
         const levels = Array.from({ length: count + 1 }, (_, i) => min + i * step);
 
@@ -53,7 +106,7 @@ export class ContourRenderer {
                 // 如果单元格内没有等值线，跳过
                 if (cellCode === 0 || cellCode === 15) continue;
 
-                // 计算插值点
+                // 计算插值���
                 const points = [];
                 if ((cellCode & 1) !== ((cellCode >> 1) & 1)) {
                     // 上边有交点
