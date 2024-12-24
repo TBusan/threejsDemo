@@ -1,0 +1,128 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <title>Three.js Contour</title>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, user-scalable=no, minimum-scale=1.0, maximum-scale=1.0">
+    <style>
+        body { margin: 0; }
+        #container { width: 1000px; height: 1000px; }
+    </style>
+</head>
+
+<body>
+    <div id="container"></div>
+
+    <script type="importmap">
+        {
+            "imports": {
+                "three": "../../../build/three.module.js",
+                "three/addons/": "../../../examples/jsm/"
+            }
+        }
+    </script>
+
+    <script type="module">
+        import * as THREE from 'three';
+        import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+        import { ContourRenderer } from './ContourRenderer.js';
+
+        class Viewer {
+            constructor(container) {
+                this.container = container;
+                this.width = container.clientWidth;
+                this.height = container.clientHeight;
+                
+                this.init();
+                this.setupResizeHandler();
+                this.render();
+            }
+
+            init() {
+                // 场景
+                this.scene = new THREE.Scene();
+                this.scene.background = new THREE.Color(0xffffff);
+
+                // 相机
+                const frustumSize = 10;
+                const aspect = this.width / this.height;
+                this.camera = new THREE.OrthographicCamera(
+                    -frustumSize * aspect / 2,
+                    frustumSize * aspect / 2,
+                    frustumSize / 2,
+                    -frustumSize / 2,
+                    0.1, 1000
+                );
+                this.camera.position.z = 5;
+
+                // 渲染器
+                this.renderer = new THREE.WebGLRenderer({ antialias: true });
+                this.renderer.setSize(this.width, this.height);
+                this.container.appendChild(this.renderer.domElement);
+
+                // 控制器
+                this.controls = new OrbitControls(this.camera, this.renderer.domElement);
+                this.controls.enableRotate = false;
+                this.controls.enableZoom = true;
+                this.controls.enablePan = true;
+
+                // 添加等值线
+                this.addContour();
+            }
+
+            addContour() {
+                // 测试数据
+                const data = {
+                    z: [[2, 4, 7, 12, 13, 14, 15, 16],
+                        [3, 1, 6, 11, 12, 13, 16, 17],
+                        [4, 2, 7, 7, 11, 14, 17, 18],
+                        [5, 3, 8, 8, 13, 15, 18, 19],
+                        [7, 4, 10, 9, 16, 18, 20, 19],
+                        [9, 10, 5, 27, 23, 21, 21, 21],
+                        [11, 14, 17, 26, 25, 24, 23, 22]],
+                    x: [0, 1, 2, 3, 4, 5, 6, 7],
+                    y: [0, 1, 2, 3, 4, 5, 6]
+                };
+
+                const contourRenderer = new ContourRenderer(data);
+                const contourMesh = contourRenderer.generate();
+                
+                // 调整等值线位置和缩放
+                contourMesh.scale.set(1, 1, 1);
+                contourMesh.position.set(-3.5, -3, 0);  // 居中显示
+                
+                this.scene.add(contourMesh);
+            }
+
+            setupResizeHandler() {
+                window.addEventListener('resize', () => {
+                    this.width = this.container.clientWidth;
+                    this.height = this.container.clientHeight;
+
+                    // 更新相机
+                    const frustumSize = 10;
+                    const aspect = this.width / this.height;
+                    this.camera.left = -frustumSize * aspect / 2;
+                    this.camera.right = frustumSize * aspect / 2;
+                    this.camera.updateProjectionMatrix();
+
+                    // 更新渲染器
+                    this.renderer.setSize(this.width, this.height);
+                });
+            }
+
+            render() {
+                requestAnimationFrame(this.render.bind(this));
+                this.controls.update();
+                this.renderer.render(this.scene, this.camera);
+            }
+        }
+
+        // 创建查看器实例
+        const viewer = new Viewer(document.getElementById('container'));
+    </script>
+
+</body>
+
+</html>
