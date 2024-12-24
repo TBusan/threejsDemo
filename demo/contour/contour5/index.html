@@ -156,10 +156,10 @@
                 }
 
                 void main() {
-                    // 计算场值
-                    float x = vUv.x * 10.0 - 5.0;
-                    float y = vUv.y * 10.0 - 5.0;
-                    float value = (exp(x * 0.3) + y * 0.5) / 10.0; // 归一化到[0,1]范围
+                    // 将UV坐标映射到[-30,30]范围
+                    float x = vUv.x * 60.0 - 30.0;
+                    float y = vUv.y * 60.0 - 30.0;
+                    float value = (exp((x) * 0.05) + (y) * 0.1) / 10.0; // 使用与数据生成相同的函数
                     
                     vec3 color = getColor(value);
                     gl_FragColor = vec4(color, 1.0);
@@ -172,21 +172,24 @@
                 side: THREE.DoubleSide
             });
 
-            const geometry = new THREE.PlaneGeometry(10, 10, 1, 1);
+            // 创建与坐标系大小相同的平面
+            const geometry = new THREE.PlaneGeometry(60, 60, 1, 1);
             const plane = new THREE.Mesh(geometry, material);
-            plane.position.z = -0.1; // 将平面放在等值线后面
+            plane.position.z = -0.1;
             scene.add(plane);
         }
 
-        // 修改数据生成函数以匹配渐变效果
+        // 修改数据生成函数，使坐标范围与显示的刻度对应
         function generateData(width, height) {
             const data = new Array(height);
             for (let y = 0; y < height; y++) {
                 data[y] = new Array(width);
                 for (let x = 0; x < width; x++) {
-                    const xPos = (x / width) * 10 - 5;
-                    const yPos = (y / height) * 10 - 5;
-                    data[y][x] = Math.exp(xPos * 0.3) + yPos * 0.5;
+                    // 将坐标映射到[0,60]范围
+                    const xPos = (x / width) * 60;
+                    const yPos = (y / height) * 60;
+                    // 生成数据，使用相对于坐标系的值
+                    data[y][x] = Math.exp((xPos - 30) * 0.05) + (yPos - 30) * 0.1;
                 }
             }
             return data;
@@ -213,14 +216,14 @@
                 return (level - z1) / (z2 - z1);
             }
 
-            // 扫描每一行
             for (let y = 0; y < height - 1; y++) {
                 const rowPoints = [];
                 for (let x = 0; x < width - 1; x++) {
-                    const x0 = (x / width) * 10 - 5;
-                    const y0 = (y / height) * 10 - 5;
-                    const dx = 10 / width;
-                    const dy = 10 / height;
+                    // 将坐标映射到[-30,30]范围，与坐标轴对应
+                    const x0 = (x / width) * 60 - 30;
+                    const y0 = (y / height) * 60 - 30;
+                    const dx = 60 / width;
+                    const dy = 60 / height;
 
                     const z00 = data[y][x];
                     const z10 = data[y][x + 1];
@@ -285,7 +288,7 @@
             renderer.render(scene, camera);
         }
 
-        // 添加创建网格的函数
+        // 添��创建网格的函数
         function createGrid() {
             const gridSize = 60;
             const gridDivisions = 12; // 每个轴上的分割数
