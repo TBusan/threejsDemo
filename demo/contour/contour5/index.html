@@ -91,43 +91,99 @@
             const data = generateData(width, height);
             const levels = generateLevels(15);
 
+            // 首先创建渐变背景
+            createGradientBackground(data);
+
+            // 然后创建等值线
             levels.forEach((level, index) => {
                 const color = new THREE.Color();
                 color.setHSL(0.7 - index * 0.05, 1, 0.5);
                 
-                // 获取连续的点序列
                 const points = generateContour(data, level);
                 
-                // 使用 Line 而不是 LineSegments
                 const material = new THREE.LineBasicMaterial({
-                    color: color,
+                    color: 0x000000,  // 使用黑色线条
                     linewidth: 1,
-                    opacity: 0.8,
+                    opacity: 0.3,
                     transparent: true
                 });
 
                 const geometry = new THREE.BufferGeometry().setFromPoints(points);
-                // 使用 Line 来创建连续的线条
                 const contourLine = new THREE.Line(geometry, material);
                 scene.add(contourLine);
             });
         }
 
+        // 添加渐变背景函数
+        function createGradientBackground(data) {
+            const vertexShader = `
+                varying vec2 vUv;
+                void main() {
+                    vUv = uv;
+                    gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+                }
+            `;
+
+            const fragmentShader = `
+                varying vec2 vUv;
+                
+                vec3 getColor(float value) {
+                    // 从蓝色渐变到红色
+                    vec3 blue = vec3(0.0, 0.0, 1.0);
+                    vec3 lightBlue = vec3(0.4, 0.4, 1.0);
+                    vec3 white = vec3(0.9, 0.9, 1.0);
+                    vec3 orange = vec3(1.0, 0.5, 0.0);
+                    vec3 red = vec3(1.0, 0.0, 0.0);
+                    
+                    if (value < 0.25) {
+                        return mix(blue, lightBlue, value * 4.0);
+                    } else if (value < 0.5) {
+                        return mix(lightBlue, white, (value - 0.25) * 4.0);
+                    } else if (value < 0.75) {
+                        return mix(white, orange, (value - 0.5) * 4.0);
+                    } else {
+                        return mix(orange, red, (value - 0.75) * 4.0);
+                    }
+                }
+
+                void main() {
+                    // 计算场值
+                    float x = vUv.x * 10.0 - 5.0;
+                    float y = vUv.y * 10.0 - 5.0;
+                    float value = (exp(x * 0.3) + y * 0.5) / 10.0; // 归一化到[0,1]范围
+                    
+                    vec3 color = getColor(value);
+                    gl_FragColor = vec4(color, 1.0);
+                }
+            `;
+
+            const material = new THREE.ShaderMaterial({
+                vertexShader: vertexShader,
+                fragmentShader: fragmentShader,
+                side: THREE.DoubleSide
+            });
+
+            const geometry = new THREE.PlaneGeometry(10, 10, 1, 1);
+            const plane = new THREE.Mesh(geometry, material);
+            plane.position.z = -0.1; // 将平面放在等值线后面
+            scene.add(plane);
+        }
+
+        // 修改数据生成函数以匹配渐变效果
         function generateData(width, height) {
             const data = new Array(height);
             for (let y = 0; y < height; y++) {
                 data[y] = new Array(width);
                 for (let x = 0; x < width; x++) {
-                    // 将坐标映射到合适的范围
                     const xPos = (x / width) * 10 - 5;
                     const yPos = (y / height) * 10 - 5;
-                    // 生成指数型数据
                     data[y][x] = Math.exp(xPos * 0.3) + yPos * 0.5;
                 }
             }
             return data;
         }
 
+        // 修改等值线级别生成函数
         function generateLevels(count) {
             const min = 0;
             const max = 10;
