@@ -1,0 +1,321 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <title>three.js webgl - animation - keyframes</title>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, user-scalable=no, minimum-scale=1.0, maximum-scale=1.0">
+    <link type="text/css" rel="stylesheet" href="main.css">
+    <style>
+        body {
+            background-color: #bfe3dd;
+            color: #000;
+        }
+
+        a {
+            color: #2983ff;
+        }
+
+        #container {
+            width: 1000px;
+            height: 1000px;
+        }
+    </style>
+</head>
+
+<body>
+
+    <div id="container"></div>
+
+    <div id="info">
+        <a href="https://threejs.org" target="_blank" rel="noopener">three.js</a> webgl - animation - keyframes<br />
+        Model: <a href="https://artstation.com/artwork/1AGwX" target="_blank" rel="noopener">Littlest Tokyo</a> by
+        <a href="https://artstation.com/glenatron" target="_blank" rel="noopener">Glen Fox</a>, CC Attribution.
+    </div>
+
+    <script type="importmap">
+			{
+				"imports": {
+					"three": "../build/three.module.js",
+					"three/addons/": "../examples/jsm/"
+				}
+			}
+		</script>
+
+    <script type="module">
+
+        import * as THREE from 'three';
+
+        import Stats from 'three/addons/libs/stats.module.js';
+
+        import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+        import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
+
+        import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+        import { DRACOLoader } from 'three/addons/loaders/DRACOLoader.js';
+
+
+        class ContourPlot {
+            constructor(data, options = {}) {
+                this.data = data;
+                this.options = {
+                    width: options.width || 800,
+                    height: options.height || 600,
+                    colorScale: options.colorScale || ['blue', '#4444ff', '#ff4444', 'red'],
+                    levels: options.levels || 10,
+                    lineWidth: options.lineWidth || 2.0,
+                    smoothingFactor: options.smoothingFactor || 3
+                };
+
+                this.init();
+            }
+
+            init() {
+                // 创建场景
+                this.scene = new THREE.Scene();
+                this.camera = new THREE.OrthographicCamera(
+                    -this.options.width / 2,
+                    this.options.width / 2,
+                    this.options.height / 2,
+                    -this.options.height / 2,
+                    0.1,
+                    1000
+                );
+                this.renderer = new THREE.WebGLRenderer({ antialias: true });
+
+                // 创建数据纹理
+                this.dataTexture = this.createDataTexture();
+
+                // 创建着色器材质
+                this.material = new THREE.ShaderMaterial({
+                    uniforms: {
+                        uDataTexture: { value: this.dataTexture },
+                        uLevels: { value: this.options.levels },
+                        uColorScale: { value: this.createColorScale() },
+                        uDataRange: { value: this.getDataRange() },
+                        uLineWidth: { value: this.options.lineWidth },
+                        uResolution: { value: new THREE.Vector2(this.options.width, this.options.height) }
+                    },
+                    vertexShader: `
+                varying vec2 vUv;
+                void main() {
+                    vUv = uv;
+                    gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+                }
+            `,
+                    fragmentShader: `
+                uniform sampler2D uDataTexture;
+                uniform sampler2D uColorScale;
+                uniform vec2 uDataRange;
+                uniform float uLevels;
+                uniform float uLineWidth;
+                uniform vec2 uResolution;
+                varying vec2 vUv;
+
+                // 获取数据值
+                float getData(vec2 uv) {
+                    return texture2D(uDataTexture, uv).r;
+                }
+
+                // 计算梯度
+                vec2 getGradient(vec2 uv) {
+                    vec2 texelSize = 1.0 / uResolution;
+                    float dx = getData(uv + vec2(texelSize.x, 0.0)) - getData(uv - vec2(texelSize.x, 0.0));
+                    float dy = getData(uv + vec2(0.0, texelSize.y)) - getData(uv - vec2(0.0, texelSize.y));
+                    return vec2(dx, dy) * 0.5;
+                }
+
+                void main() {
+                    float value = getData(vUv);
+                    float normalizedValue = (value - uDataRange.x) / (uDataRange.y - uDataRange.x);
+                    
+                    // 计算等值线
+                    vec2 gradient = getGradient(vUv);
+                    float gradientMag = length(gradient);
+                    
+                    // 改进的等值线计算
+                    float scaledValue = normalizedValue * uLevels;
+                    float contourValue = abs(fract(scaledValue) - 0.5);
+                    float lineIntensity = smoothstep(0.0, 0.1, contourValue);
+                    
+                    // 基于梯度调整线宽
+                    float adaptiveWidth = uLineWidth / (gradientMag * uResolution.x + 1.0);
+                    float contourAlpha = smoothstep(adaptiveWidth, 0.0, contourValue);
+                    
+                    // 获取颜色并应用平滑过渡
+                    vec4 baseColor = texture2D(uColorScale, vec2(normalizedValue, 0.5));
+                    vec3 contourColor = vec3(0.0);
+                    
+                    // 混合颜色，使用改进的混合方法
+                    vec3 finalColor = mix(baseColor.rgb, contourColor, contourAlpha * 0.8);
+                    
+                    // 添加轻微的边缘增强
+                    finalColor += vec3(gradientMag * 0.1);
+                    
+                    gl_FragColor = vec4(finalColor, 1.0);
+                }
+            `
+                });
+
+                // 创建平面几何体
+                const geometry = new THREE.PlaneGeometry(
+                    this.options.width,
+                    this.options.height
+                );
+
+                // 创建网格
+                this.mesh = new THREE.Mesh(geometry, this.material);
+                this.scene.add(this.mesh);
+
+                // 设置相机位置
+                this.camera.position.z = 100;
+            }
+
+            getDataRange() {
+                let min = Infinity;
+                let max = -Infinity;
+                
+                for (let row of this.data) {
+                    for (let value of row) {
+                        min = Math.min(min, value);
+                        max = Math.max(max, value);
+                    }
+                }
+                
+                return new THREE.Vector2(min, max);
+            }
+
+            createDataTexture() {
+                const width = this.data[0].length;
+                const height = this.data.length;
+                const size = width * height;
+                const data = new Float32Array(size * 4);
+
+                // ��用双线性插值平滑数据
+                for (let i = 0; i < height; i++) {
+                    for (let j = 0; j < width; j++) {
+                        const index = (i * width + j) * 4;
+                        const value = this.smoothData(i, j);
+                        data[index] = value;
+                        data[index + 1] = 0;
+                        data[index + 2] = 0;
+                        data[index + 3] = 1;
+                    }
+                }
+
+                const texture = new THREE.DataTexture(
+                    data,
+                    width,
+                    height,
+                    THREE.RGBAFormat,
+                    THREE.FloatType
+                );
+                texture.needsUpdate = true;
+                return texture;
+            }
+
+            // 改进平滑方法
+            smoothData(i, j) {
+                const radius = this.options.smoothingFactor;
+                let sum = 0;
+                let weightSum = 0;
+                
+                for (let di = -radius; di <= radius; di++) {
+                    for (let dj = -radius; dj <= radius; dj++) {
+                        const ni = i + di;
+                        const nj = j + dj;
+                        
+                        if (ni >= 0 && ni < this.data.length && 
+                            nj >= 0 && nj < this.data[0].length) {
+                            // 使用高斯权重
+                            const distance = Math.sqrt(di * di + dj * dj);
+                            const weight = Math.exp(-(distance * distance) / (2 * radius * radius));
+                            sum += this.data[ni][nj] * weight;
+                            weightSum += weight;
+                        }
+                    }
+                }
+                
+                return sum / weightSum;
+            }
+
+            createColorScale() {
+                // 创建颜色渐变纹理
+                const canvas = document.createElement('canvas');
+                canvas.width = 256;
+                canvas.height = 1;
+
+                const ctx = canvas.getContext('2d');
+                const gradient = ctx.createLinearGradient(0, 0, 256, 0);
+
+                this.options.colorScale.forEach((color, index) => {
+                    gradient.addColorStop(
+                        index / (this.options.colorScale.length - 1),
+                        color
+                    );
+                });
+
+                ctx.fillStyle = gradient;
+                ctx.fillRect(0, 0, 256, 1);
+
+                const texture = new THREE.CanvasTexture(canvas);
+                texture.needsUpdate = true;
+
+                return texture;
+            }
+
+            render() {
+                this.renderer.render(this.scene, this.camera);
+            }
+        }
+
+
+        // 改进数据生成函数
+        const generateData = (width, height) => {
+            const data = [];
+            for (let i = 0; i < height; i++) {
+                const row = [];
+                for (let j = 0; j < width; j++) {
+                    const x = (j / width * 6 - 3);
+                    const y = (i / height * 6 - 3);
+                    const r = Math.sqrt(x * x + y * y);
+                    // 使用更复杂的函数生成更自然的数据
+                    const value = Math.sin(r * 2) * Math.exp(-r * 0.2) + 
+                                 Math.sin(x * 3) * Math.sin(y * 2) * 0.3 +
+                                 Math.sin(x * y * 0.5) * 0.2;
+                    row.push(value);
+                }
+                data.push(row);
+            }
+            return data;
+        };
+
+        const data = generateData(200, 200);
+
+        // 创建等值线图实例时使用更多配置
+        const contourPlot = new ContourPlot(generateData(200, 200), {
+            width: 1000,
+            height: 1000,
+            colorScale: ['#0000ff', '#4444ff', '#ff4444', '#ff0000'],
+            levels: 40,
+            lineWidth: 2.0,
+            smoothingFactor: 3
+        });
+
+        // 将渲染器添加到页面
+        let container = document.getElementById('container');
+
+        contourPlot.renderer.setPixelRatio( window.devicePixelRatio );
+        contourPlot.renderer.setSize( 1000,1000);
+
+        container.appendChild(contourPlot.renderer.domElement);
+
+        // 渲染
+        contourPlot.render();
+
+
+    </script>
+
+</body>
+
+</html>

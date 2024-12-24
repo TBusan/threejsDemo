@@ -57,6 +57,14 @@
         let camera, scene, renderer, controls;
         const container = document.getElementById('container');
 
+        let raycaster, mouse, tooltip;
+
+        function getFieldValue(x, y) {
+            const scaledY = y * 10.0;
+            const scaledX = x * 10.0;
+            return 15.0 - (scaledY - Math.sin(scaledX * 0.5) * 2.0);
+        }
+
         init();
         animate();
 
@@ -78,6 +86,24 @@
             // 控制器设置
             controls = new OrbitControls(camera, renderer.domElement);
             controls.enableDamping = true;
+
+            // 初始化射线检测器和鼠标位置
+            raycaster = new THREE.Raycaster();
+            raycaster.params.Line.threshold = 0.1; // 调整线条检测的阈值
+            mouse = new THREE.Vector2();
+
+            // 创建提示框
+            tooltip = document.createElement('div');
+            tooltip.style.position = 'absolute';
+            tooltip.style.backgroundColor = 'rgba(0, 0, 0, 0.7)';
+            tooltip.style.color = 'white';
+            tooltip.style.padding = '5px';
+            tooltip.style.borderRadius = '5px';
+            tooltip.style.display = 'none';
+            container.appendChild(tooltip);
+
+            // 添加鼠标移动事件监听
+            container.addEventListener('mousemove', onMouseMove);
 
             // 创建等值线平面
             createContourPlane();
@@ -157,11 +183,13 @@
             const resolution = 200;
             const contourLevels = 15;
             
-            function getFieldValue(x, y) {
-                const scaledY = y * 10.0;
-                const scaledX = x * 10.0;
-                return 15.0 - (scaledY - Math.sin(scaledX * 0.5) * 2.0);
-            }
+            // 修改线条材质，增加线条宽度以便更容易选中
+            const lineMaterial = new THREE.LineBasicMaterial({
+                color: 0x000000,
+                linewidth: 1,
+                transparent: true,
+                opacity: 0.2
+            });
 
             function findIntersection(x1, y1, x2, y2, val1, val2, targetValue) {
                 const t = (targetValue - val1) / (val2 - val1);
@@ -226,14 +254,8 @@
                 // 创建线段几何体
                 if (lineSegments.length > 0) {
                     const lineGeometry = new THREE.BufferGeometry().setFromPoints(lineSegments);
-                    const lineMaterial = new THREE.LineBasicMaterial({
-                        color: 0x000000,
-                        linewidth: 1,
-                        transparent: true,
-                        opacity: 0.2
-                    });
-                    
                     const line = new THREE.LineSegments(lineGeometry, lineMaterial);
+                    line.userData.contourValue = targetValue; // 存储等值线的值
                     scene.add(line);
                 }
             }
@@ -249,6 +271,36 @@
             requestAnimationFrame(animate);
             controls.update();
             renderer.render(scene, camera);
+        }
+
+        function onMouseMove(event) {
+            // 计算鼠标在归一化设备坐标中的位置
+            const rect = container.getBoundingClientRect();
+            mouse.x = ((event.clientX - rect.left) / container.clientWidth) * 2 - 1;
+            mouse.y = -((event.clientY - rect.top) / container.clientHeight) * 2 + 1;
+
+            // 更新射线
+            raycaster.setFromCamera(mouse, camera);
+
+            // 检查射线与所有等值线的相交
+            const intersects = raycaster.intersectObjects(scene.children.filter(obj => obj instanceof THREE.LineSegments));
+
+            if (intersects.length > 0) {
+                // 找到最近的交点
+                const intersect = intersects[0];
+                const point = intersect.point;
+
+                // 计算该点的场值
+                const value = getFieldValue(point.x / 5, point.y / 5);
+
+                // 更新提示框位置和内容
+                tooltip.style.display = 'block';
+                tooltip.style.left = (event.clientX + 10) + 'px';
+                tooltip.style.top = (event.clientY + 10) + 'px';
+                tooltip.textContent = `Value: ${value.toFixed(2)}`;
+            } else {
+                tooltip.style.display = 'none';
+            }
         }
 
     </script>
