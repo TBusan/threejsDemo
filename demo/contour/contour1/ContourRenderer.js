@@ -10,8 +10,16 @@ export class ContourRenderer {
             showLabels: false,
             labelSize: 0.3,
             labelColor: '#000000',
+            showAxes: false,
+            axisColor: '#000000',
+            axisWidth: 2,
+            tickSize: 0.1,
             ...options
         };
+
+        if (this.options.showAxes) {
+            this.createAxes();
+        }
     }
 
     interpolateData(data, factor) {
@@ -271,6 +279,125 @@ export class ContourRenderer {
         const sprite = new THREE.Sprite(spriteMaterial);
         sprite.position.set(midPoint[0], midPoint[1], 0.1);
         sprite.scale.set(this.options.labelSize * 0.8, this.options.labelSize * 0.4, 1);  // 稍微减小标签尺寸
+        sprite.renderOrder = 1;
+
+        this.group.add(sprite);
+    }
+
+    createAxes() {
+        // 创建X轴
+        const xAxisGeometry = new THREE.BufferGeometry();
+        const xAxisPoints = [
+            new THREE.Vector3(0, 0, 0),
+            new THREE.Vector3(this.data.x[this.width - 1], 0, 0)
+        ];
+        xAxisGeometry.setFromPoints(xAxisPoints);
+        const xAxisMaterial = new THREE.LineBasicMaterial({
+            color: this.options.axisColor,
+            linewidth: this.options.axisWidth
+        });
+        const xAxis = new THREE.Line(xAxisGeometry, xAxisMaterial);
+        this.group.add(xAxis);
+
+        // 创建Y轴
+        const yAxisGeometry = new THREE.BufferGeometry();
+        const yAxisPoints = [
+            new THREE.Vector3(0, 0, 0),
+            new THREE.Vector3(0, this.data.y[this.height - 1], 0)
+        ];
+        yAxisGeometry.setFromPoints(yAxisPoints);
+        const yAxisMaterial = new THREE.LineBasicMaterial({
+            color: this.options.axisColor,
+            linewidth: this.options.axisWidth
+        });
+        const yAxis = new THREE.Line(yAxisGeometry, yAxisMaterial);
+        this.group.add(yAxis);
+
+        // 添加X轴刻度和标签
+        const xStep = Math.ceil(this.width / 10); // 控制刻度数量
+        for (let i = 0; i < this.width; i += xStep) {
+            // 创建刻度线
+            const tickGeometry = new THREE.BufferGeometry();
+            const tickPoints = [
+                new THREE.Vector3(this.data.x[i], 0, 0),
+                new THREE.Vector3(this.data.x[i], -this.options.tickSize, 0)
+            ];
+            tickGeometry.setFromPoints(tickPoints);
+            const tick = new THREE.Line(tickGeometry, xAxisMaterial);
+            this.group.add(tick);
+
+            // 添加刻度标签
+            this.createAxisLabel(
+                this.data.x[i].toFixed(1),
+                this.data.x[i],
+                -this.options.tickSize * 2,
+                'x'
+            );
+        }
+
+        // 添加Y轴刻度和标签
+        const yStep = Math.ceil(this.height / 10);
+        for (let i = 0; i < this.height; i += yStep) {
+            // 创建刻度线
+            const tickGeometry = new THREE.BufferGeometry();
+            const tickPoints = [
+                new THREE.Vector3(0, this.data.y[i], 0),
+                new THREE.Vector3(-this.options.tickSize, this.data.y[i], 0)
+            ];
+            tickGeometry.setFromPoints(tickPoints);
+            const tick = new THREE.Line(tickGeometry, yAxisMaterial);
+            this.group.add(tick);
+
+            // 添加刻度标签
+            this.createAxisLabel(
+                this.data.y[i].toFixed(1),
+                -this.options.tickSize * 2,
+                this.data.y[i],
+                'y'
+            );
+        }
+    }
+
+    createAxisLabel(text, x, y, axis) {
+        const canvas = document.createElement('canvas');
+        const ctx = canvas.getContext('2d');
+        canvas.width = 64;
+        canvas.height = 32;
+
+        ctx.fillStyle = this.options.axisColor;
+        ctx.font = 'bold 24px Arial';
+        ctx.textAlign = axis === 'x' ? 'center' : 'right';
+        ctx.textBaseline = axis === 'x' ? 'top' : 'middle';
+
+        // 添加白色背景
+        const textWidth = ctx.measureText(text).width;
+        const padding = 2;
+        ctx.fillStyle = 'white';
+        ctx.fillRect(
+            axis === 'x' ? (canvas.width - textWidth) / 2 - padding : canvas.width - textWidth - padding * 2,
+            axis === 'x' ? 0 : (canvas.height - 24) / 2,
+            textWidth + padding * 2,
+            24
+        );
+
+        // 绘制文本
+        ctx.fillStyle = this.options.axisColor;
+        ctx.fillText(text, 
+            axis === 'x' ? canvas.width / 2 : canvas.width - padding,
+            axis === 'x' ? padding : canvas.height / 2
+        );
+
+        const texture = new THREE.CanvasTexture(canvas);
+        const spriteMaterial = new THREE.SpriteMaterial({
+            map: texture,
+            transparent: true,
+            depthTest: false,
+            depthWrite: false
+        });
+
+        const sprite = new THREE.Sprite(spriteMaterial);
+        sprite.position.set(x, y, 0.1);
+        sprite.scale.set(this.options.labelSize * 0.6, this.options.labelSize * 0.3, 1);
         sprite.renderOrder = 1;
 
         this.group.add(sprite);

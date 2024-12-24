@@ -88,7 +88,11 @@
                 const contourRenderer = new ContourRenderer(data, {
                     showLabels: true,
                     labelSize: 0.5,
-                    labelColor: '#000000'
+                    labelColor: '#000000',
+                    showAxes: true,
+                    axisColor: '#000000',
+                    axisWidth: 2,
+                    tickSize: 0.1
                 });
                 const contourMesh = contourRenderer.generate();
                 
