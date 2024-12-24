@@ -89,14 +89,16 @@
             const width = 200;
             const height = 200;
             const data = generateData(width, height);
-            const levels = generateLevels(15); // 生成15条等值线
+            const levels = generateLevels(15);
 
-            // 为每个level创建一个等值线
             levels.forEach((level, index) => {
                 const color = new THREE.Color();
-                color.setHSL(0.7 - index * 0.05, 1, 0.5); // 从蓝色到红色的渐变
+                color.setHSL(0.7 - index * 0.05, 1, 0.5);
                 
-                const lines = generateContour(data, level);
+                // 获取连续的点序列
+                const points = generateContour(data, level);
+                
+                // 使用 Line 而不是 LineSegments
                 const material = new THREE.LineBasicMaterial({
                     color: color,
                     linewidth: 1,
@@ -104,8 +106,9 @@
                     transparent: true
                 });
 
-                const geometry = new THREE.BufferGeometry().setFromPoints(lines);
-                const contourLine = new THREE.LineSegments(geometry, material);
+                const geometry = new THREE.BufferGeometry().setFromPoints(points);
+                // 使用 Line 来创建连续的线条
+                const contourLine = new THREE.Line(geometry, material);
                 scene.add(contourLine);
             });
         }
@@ -136,65 +139,73 @@
         }
 
         function generateContour(data, level) {
-            const lines = [];
             const width = data[0].length;
             const height = data.length;
+            const points = [];
 
             function interpolate(v1, v2, z1, z2, level) {
                 if (Math.abs(z1 - z2) < 1e-10) return 0;
                 return (level - z1) / (z2 - z1);
             }
 
-            // 使用Marching Squares算法
+            // 扫描每一行
             for (let y = 0; y < height - 1; y++) {
+                const rowPoints = [];
                 for (let x = 0; x < width - 1; x++) {
                     const x0 = (x / width) * 10 - 5;
                     const y0 = (y / height) * 10 - 5;
                     const dx = 10 / width;
                     const dy = 10 / height;
 
-                    // 获取单元格四个角的值
                     const z00 = data[y][x];
                     const z10 = data[y][x + 1];
                     const z11 = data[y + 1][x + 1];
                     const z01 = data[y + 1][x];
 
-                    // 计算单元格配置
                     let config = 0;
                     if (z00 > level) config |= 1;
                     if (z10 > level) config |= 2;
                     if (z11 > level) config |= 4;
                     if (z01 > level) config |= 8;
 
-                    // 如果单元格穿过等值线
                     if (config !== 0 && config !== 15) {
-                        const points = [];
+                        const cellPoints = [];
 
-                        // 计算交点
-                        if ((config & 1) !== ((config & 8) >> 3)) {
-                            const t = interpolate(z00, z01, z00, z01, level);
-                            points.push(new THREE.Vector3(x0, y0 + dy * t, 0));
+                        // 按照顺时针顺序检查边
+                        if ((config & 1) !== ((config & 2) >> 1)) {
+                            const t = interpolate(z00, z10, z00, z10, level);
+                            cellPoints.push(new THREE.Vector3(x0 + dx * t, y0, 0));
                         }
                         if ((config & 2) !== ((config & 4) >> 2)) {
                             const t = interpolate(z10, z11, z10, z11, level);
-                            points.push(new THREE.Vector3(x0 + dx, y0 + dy * t, 0));
+                            cellPoints.push(new THREE.Vector3(x0 + dx, y0 + dy * t, 0));
                         }
-                        if ((config & 1) !== ((config & 2) >> 1)) {
-                            const t = interpolate(z00, z10, z00, z10, level);
-                            points.push(new THREE.Vector3(x0 + dx * t, y0, 0));
+                        if ((config & 4) !== ((config & 8) >> 3)) {
+                            const t = interpolate(z11, z01, z11, z01, level);
+                            cellPoints.push(new THREE.Vector3(x0 + dx * (1 - t), y0 + dy, 0));
                         }
-                        if ((config & 8) !== ((config & 4) >> 2)) {
-                            const t = interpolate(z01, z11, z01, z11, level);
-                            points.push(new THREE.Vector3(x0 + dx * t, y0 + dy, 0));
+                        if ((config & 8) !== (config & 1)) {
+                            const t = interpolate(z01, z00, z01, z00, level);
+                            cellPoints.push(new THREE.Vector3(x0, y0 + dy * (1 - t), 0));
                         }
 
-                        if (points.length === 2) {
-                            lines.push(...points);
+                        if (cellPoints.length === 2) {
+                            rowPoints.push(...cellPoints);
                         }
                     }
                 }
+                
+                // 按x坐标排序点
+                if (rowPoints.length > 0) {
+                    rowPoints.sort((a, b) => a.x - b.x);
+                    points.push(...rowPoints);
+                }
             }
-            return lines;
+
+            // 对所有点按y坐标排序，确保连续性
+            points.sort((a, b) => a.y - b.y);
+            
+            return points;
         }
 
         function onWindowResize() {
