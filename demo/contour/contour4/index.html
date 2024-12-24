@@ -1,0 +1,92 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <title>three.js webgl - animation - keyframes</title>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, user-scalable=no, minimum-scale=1.0, maximum-scale=1.0">
+    <style>
+        body {
+            background-color: #bfe3dd;
+            color: #000;
+        }
+
+        a {
+            color: #2983ff;
+        }
+
+        #container {
+            width: 1000px;
+            height: 1000px;
+        }
+    </style>
+</head>
+
+<body>
+
+    <div id="container"></div>
+
+    <div id="info">
+        <a href="https://threejs.org" target="_blank" rel="noopener">three.js</a> webgl - animation - keyframes<br />
+        Model: <a href="https://artstation.com/artwork/1AGwX" target="_blank" rel="noopener">Littlest Tokyo</a> by
+        <a href="https://artstation.com/glenatron" target="_blank" rel="noopener">Glen Fox</a>, CC Attribution.
+    </div>
+
+    <script type="importmap">
+			{
+				"imports": {
+					"three": "../../../build/three.module.js",
+					"three/addons/": "../../../examples/jsm/"
+				}
+			}
+		</script>
+
+    <script type="module">
+
+        import * as THREE from 'three';
+
+        import Stats from 'three/addons/libs/stats.module.js';
+
+        import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+        import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
+
+        import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+        import { DRACOLoader } from 'three/addons/loaders/DRACOLoader.js';
+
+        import ContourScene from './contour-scene.js';
+        import ContourGenerator from './contour-generate.js';
+        import ContourMesh from './contour-mesh.js';
+
+        // 创建测试数据
+        const width = 50;
+        const height = 50;
+        const data = Array(height).fill().map(() =>
+            Array(width).fill().map(() => Math.random())
+        );
+
+        // 初始化场景
+        const scene = new ContourScene();
+
+        // 创建等值线生成器
+        const generator = new ContourGenerator(data, width, height);
+
+        // 生成多个level的等值线
+        const levels = [0.2, 0.4, 0.6, 0.8];
+        levels.forEach(level => {
+            const lines = generator.generateContours(level);
+            const contourMesh = new ContourMesh(lines);
+            scene.scene.add(contourMesh.mesh);
+        });
+
+        // 渲染循环
+        function animate() {
+            requestAnimationFrame(animate);
+            scene.renderer.render(scene.scene, scene.camera);
+        }
+        animate();
+
+    </script>
+
+</body>
+
+</html>

@@ -1,0 +1,216 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <title>three.js webgl - animation - keyframes</title>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, user-scalable=no, minimum-scale=1.0, maximum-scale=1.0">
+    <style>
+        body {
+            background-color: #bfe3dd;
+            color: #000;
+        }
+
+        a {
+            color: #2983ff;
+        }
+
+        #container {
+            width: 1000px;
+            height: 1000px;
+        }
+    </style>
+</head>
+
+<body>
+
+    <div id="container"></div>
+
+    <div id="info">
+        <a href="https://threejs.org" target="_blank" rel="noopener">three.js</a> webgl - animation - keyframes<br />
+        Model: <a href="https://artstation.com/artwork/1AGwX" target="_blank" rel="noopener">Littlest Tokyo</a> by
+        <a href="https://artstation.com/glenatron" target="_blank" rel="noopener">Glen Fox</a>, CC Attribution.
+    </div>
+
+    <script type="importmap">
+			{
+				"imports": {
+					"three": "../../../build/three.module.js",
+					"three/addons/": "../../../examples/jsm/"
+				}
+			}
+		</script>
+
+    <script type="module">
+
+        import * as THREE from 'three';
+
+        import Stats from 'three/addons/libs/stats.module.js';
+
+        import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+        import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
+
+        import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+        import { DRACOLoader } from 'three/addons/loaders/DRACOLoader.js';
+
+        let camera, scene, renderer, controls;
+        const container = document.getElementById('container');
+
+        init();
+        animate();
+
+        function init() {
+            // 场景设置
+            scene = new THREE.Scene();
+            scene.background = new THREE.Color(0xffffff);
+
+            // 相机设置
+            camera = new THREE.PerspectiveCamera(75, container.clientWidth / container.clientHeight, 0.1, 1000);
+            camera.position.set(0, 0, 20);
+
+            // 渲染器设置
+            renderer = new THREE.WebGLRenderer({ antialias: true });
+            renderer.setPixelRatio(window.devicePixelRatio);
+            renderer.setSize(container.clientWidth, container.clientHeight);
+            container.appendChild(renderer.domElement);
+
+            // 控制器设置
+            controls = new OrbitControls(camera, renderer.domElement);
+            controls.enableDamping = true;
+
+            // 创建等值线
+            createContourPlot();
+
+            // 窗口大小调整
+            window.addEventListener('resize', onWindowResize);
+        }
+
+        function createContourPlot() {
+            const width = 200;
+            const height = 200;
+            const data = generateData(width, height);
+            const levels = generateLevels(15); // 生成15条等值线
+
+            // 为每个level创建一个等值线
+            levels.forEach((level, index) => {
+                const color = new THREE.Color();
+                color.setHSL(0.7 - index * 0.05, 1, 0.5); // 从蓝色到红色的渐变
+                
+                const lines = generateContour(data, level);
+                const material = new THREE.LineBasicMaterial({
+                    color: color,
+                    linewidth: 1,
+                    opacity: 0.8,
+                    transparent: true
+                });
+
+                const geometry = new THREE.BufferGeometry().setFromPoints(lines);
+                const contourLine = new THREE.LineSegments(geometry, material);
+                scene.add(contourLine);
+            });
+        }
+
+        function generateData(width, height) {
+            const data = new Array(height);
+            for (let y = 0; y < height; y++) {
+                data[y] = new Array(width);
+                for (let x = 0; x < width; x++) {
+                    // 将坐标映射到合适的范围
+                    const xPos = (x / width) * 10 - 5;
+                    const yPos = (y / height) * 10 - 5;
+                    // 生成指数型数据
+                    data[y][x] = Math.exp(xPos * 0.3) + yPos * 0.5;
+                }
+            }
+            return data;
+        }
+
+        function generateLevels(count) {
+            const min = 0;
+            const max = 10;
+            const levels = [];
+            for (let i = 0; i < count; i++) {
+                levels.push(min + (max - min) * (i / (count - 1)));
+            }
+            return levels;
+        }
+
+        function generateContour(data, level) {
+            const lines = [];
+            const width = data[0].length;
+            const height = data.length;
+
+            function interpolate(v1, v2, z1, z2, level) {
+                if (Math.abs(z1 - z2) < 1e-10) return 0;
+                return (level - z1) / (z2 - z1);
+            }
+
+            // 使用Marching Squares算法
+            for (let y = 0; y < height - 1; y++) {
+                for (let x = 0; x < width - 1; x++) {
+                    const x0 = (x / width) * 10 - 5;
+                    const y0 = (y / height) * 10 - 5;
+                    const dx = 10 / width;
+                    const dy = 10 / height;
+
+                    // 获取单元格四个角的值
+                    const z00 = data[y][x];
+                    const z10 = data[y][x + 1];
+                    const z11 = data[y + 1][x + 1];
+                    const z01 = data[y + 1][x];
+
+                    // 计算单元格配置
+                    let config = 0;
+                    if (z00 > level) config |= 1;
+                    if (z10 > level) config |= 2;
+                    if (z11 > level) config |= 4;
+                    if (z01 > level) config |= 8;
+
+                    // 如果单元格穿过等值线
+                    if (config !== 0 && config !== 15) {
+                        const points = [];
+
+                        // 计算交点
+                        if ((config & 1) !== ((config & 8) >> 3)) {
+                            const t = interpolate(z00, z01, z00, z01, level);
+                            points.push(new THREE.Vector3(x0, y0 + dy * t, 0));
+                        }
+                        if ((config & 2) !== ((config & 4) >> 2)) {
+                            const t = interpolate(z10, z11, z10, z11, level);
+                            points.push(new THREE.Vector3(x0 + dx, y0 + dy * t, 0));
+                        }
+                        if ((config & 1) !== ((config & 2) >> 1)) {
+                            const t = interpolate(z00, z10, z00, z10, level);
+                            points.push(new THREE.Vector3(x0 + dx * t, y0, 0));
+                        }
+                        if ((config & 8) !== ((config & 4) >> 2)) {
+                            const t = interpolate(z01, z11, z01, z11, level);
+                            points.push(new THREE.Vector3(x0 + dx * t, y0 + dy, 0));
+                        }
+
+                        if (points.length === 2) {
+                            lines.push(...points);
+                        }
+                    }
+                }
+            }
+            return lines;
+        }
+
+        function onWindowResize() {
+            camera.aspect = container.clientWidth / container.clientHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(container.clientWidth, container.clientHeight);
+        }
+
+        function animate() {
+            requestAnimationFrame(animate);
+            controls.update();
+            renderer.render(scene, camera);
+        }
+
+    </script>
+
+</body>
+
+</html>
