@@ -217,7 +217,7 @@ class RayTracer {
 
         // 更新控制器
         this.controls.update();
-
+ 
         // 渲染场景
         this.renderer.render(this.scene, this.camera);
     }
