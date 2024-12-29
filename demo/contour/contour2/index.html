@@ -70,17 +70,6 @@
             smoothing: 0.2
         });
 
-        // 动态更新示例
-        setInterval(() => {
-            const newData = {
-                ...data,
-                z: data.z.map(row =>
-                    row.map(val => val + (Math.random() - 0.5) * 0.1)
-                )
-            };
-            renderer.update(newData);
-        }, 1000);
-
         // 响应窗口大小变化
         window.addEventListener('resize', () => {
             renderer.resize(window.innerWidth, window.innerHeight);
