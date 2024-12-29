@@ -41,10 +41,10 @@ class ThreeContourRenderer {
 
         // 修改控制器设置
         this.controls = new OrbitControls(this.camera, this.renderer.domElement);
-        this.controls.enableRotate = false;  // 禁用旋转
-        this.controls.enableZoom = true;     // 允许缩放
-        this.controls.enablePan = true;      // 允许平移
-        this.controls.screenSpacePanning = true;  // 使用屏幕空间平移
+        // this.controls.enableRotate = false;  // 禁用旋转
+        // this.controls.enableZoom = true;     // 允许缩放
+        // this.controls.enablePan = true;      // 允许平移
+        // this.controls.screenSpacePanning = true;  // 使用屏幕空间平移
 
         // 初始化组件
         this.contourLines = new THREE.Group();
