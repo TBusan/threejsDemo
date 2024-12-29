@@ -65,7 +65,8 @@ class ThreeContourRenderer {
         this.mouse = new THREE.Vector2();
         this.hoveredPoint = null;
         this.hoverLabel = null;
-
+        this.pendingMouseEvent = null;  // 添加待处理的鼠标事件
+        
         // 添加鼠标移动事件监听
         this.container.addEventListener('mousemove', this.onMouseMove.bind(this));
     }
@@ -430,6 +431,12 @@ class ThreeContourRenderer {
     render = () => {
         requestAnimationFrame(this.render);
 
+        // 处理待处理的鼠标事件
+        if (this.pendingMouseEvent) {
+            this.processMouseMove(this.pendingMouseEvent);
+            this.pendingMouseEvent = null;
+        }
+
         this.controls.update();
         this.renderer.render(this.scene, this.camera);
 
@@ -483,6 +490,7 @@ class ThreeContourRenderer {
 
         this.container.removeEventListener('mousemove', this.onMouseMove);
         this.removeHoverLabel();
+        this.pendingMouseEvent = null;
     }
 
     createColorBar() {
@@ -505,7 +513,7 @@ class ThreeContourRenderer {
         // 为每个顶点设置颜色
         for (let i = 0; i < positions.length / 3; i++) {
             const row = Math.floor(i / 2);  // 每行2个顶点
-            const t = 1 - (row / (this.data.levels.length - 1));  // 从上到下递减
+            const t = row / (this.data.levels.length - 1);  // 从下到上递增
             const color = ContourUtils.getColorForValue(t, 0, 1, this.options.colorScale);
             
             colors[i * 3] = color.r;
@@ -523,10 +531,11 @@ class ThreeContourRenderer {
         const colorBar = new THREE.Mesh(geometry, material);
         colorBar.position.set(barX, barY, 0);
 
-        // 添加刻度标签
-        for (let i = 0; i < this.data.levels.length; i++) {
-            const value = this.data.levels[i];
-            const y = barY + barHeight/2 - (i / (this.data.levels.length - 1)) * barHeight;
+        // 添加刻度标签，从下到上递增
+        const reversedLevels = [...this.data.levels].reverse();
+        for (let i = 0; i < reversedLevels.length; i++) {
+            const value = reversedLevels[i];
+            const y = barY - barHeight/2 + (i / (reversedLevels.length - 1)) * barHeight;
             
             const canvas = document.createElement('canvas');
             const context = canvas.getContext('2d');
@@ -555,17 +564,20 @@ class ThreeContourRenderer {
         this.group.add(colorBar);
     }
 
-    // 添加鼠标移动处理方法
+    // 修改鼠标移动处理方法
     onMouseMove(event) {
-        // 计算鼠标在归一化设备坐标中的位置
+        // 只存储最新的鼠标事件
+        this.pendingMouseEvent = event;
+    }
+
+    // 添加实际的鼠标事件处理方法
+    processMouseMove(event) {
         const rect = this.container.getBoundingClientRect();
         this.mouse.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
         this.mouse.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
 
-        // 更新射线
         this.raycaster.setFromCamera(this.mouse, this.camera);
 
-        // 检测与平面的交点
         if (this.surface) {
             const intersects = this.raycaster.intersectObject(this.surface);
             
@@ -678,6 +690,17 @@ class ThreeContourRenderer {
             this.hoverLabel.material.map.dispose();
             this.hoverLabel = null;
         }
+    }
+
+    // 添加节流函数
+    throttle(func, limit) {
+        return (event) => {
+            const now = Date.now();
+            if (now - this.lastMoveTime >= limit) {
+                func.call(this, event);
+                this.lastMoveTime = now;
+            }
+        };
     }
 }
 

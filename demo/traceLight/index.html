@@ -1,0 +1,59 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <title>Three.js Contour</title>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, user-scalable=no, minimum-scale=1.0, maximum-scale=1.0">
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+        }
+
+        #container {
+            position: absolute;
+            left: 0;
+            top: 0;
+            right: 0;
+            bottom: 0;
+            width: 800px;
+            height: 600px;
+            margin: 0;
+            padding: 0;
+        }
+    </style>
+</head>
+
+<body>
+    <div id="container"></div>
+
+    <script type="importmap">
+        {
+            "imports": {
+                "three": "../../../build/three.module.js",
+                "three/addons/": "../../../examples/jsm/"
+            }
+        }
+    </script>
+
+    <script type="module">
+        import * as THREE from 'three';
+        import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+        import { RayTracer } from './trace.js';
+
+        // 使用示例
+        const container = document.getElementById('container');
+        const rayTracer = new RayTracer(container);
+
+        // 响应窗口大小变化
+        window.addEventListener('resize', () => {
+            rayTracer.onWindowResize(window.innerWidth, window.innerHeight);
+        });
+
+
+    </script>
+
+</body>
+
+</html>
