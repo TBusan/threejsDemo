@@ -124,32 +124,36 @@ class ThreeContourRenderer {
             vertexColors: true,
             side: THREE.DoubleSide,
             transparent: true,
-            opacity: this.options.surfaceOpacity
+            opacity: this.options.surfaceOpacity,
+            depthWrite: true,
+            renderOrder: 0
         });
 
         this.surface = new THREE.Mesh(geometry, material);
+        this.surface.renderOrder = 0;
         this.scene.add(this.surface);
     }
 
     createContourLines() {
         this.contourLines.clear();
 
-        // 获取数据范围用于颜色映射
         const values = this.data.z.flat();
         const minZ = Math.min(...values);
         const maxZ = Math.max(...values);
 
-        // 计算实际的物理尺寸
         const width = this.data.x[this.data.x.length - 1] - this.data.x[0];
         const height = this.data.y[this.data.y.length - 1] - this.data.y[0];
         const dx = width / (this.data.x.length - 1);
         const dy = height / (this.data.y.length - 1);
 
-        // 为每个等值线级别生成线段
+        // 创建一个组来存放所有线条
+        const linesGroup = new THREE.Group();
+        linesGroup.renderOrder = 999;
+
         for (const level of this.data.levels) {
             const segments = [];
 
-            // 遍历网格生成等值线段
+            // 生成等值线段
             for (let i = 0; i < this.data.y.length - 1; i++) {
                 for (let j = 0; j < this.data.x.length - 1; j++) {
                     const cell = [
@@ -162,7 +166,6 @@ class ThreeContourRenderer {
                     const x = this.data.x[j];
                     const y = this.data.y[i];
 
-                    // 计算等值线与网格边的交点
                     const intersections = this.findIntersections(cell, x, y, dx, dy, level);
                     if (intersections.length === 2) {
                         segments.push(intersections);
@@ -170,30 +173,103 @@ class ThreeContourRenderer {
                 }
             }
 
-            // 创建等值线几何体
-            segments.forEach(([start, end]) => {
+            const connectedSegments = this.connectSegments(segments);
+            
+            connectedSegments.forEach(segment => {
+                // 创建线条几何体
                 const geometry = new THREE.BufferGeometry();
                 const vertices = new Float32Array([
-                    start.x, start.y, level + 0.01,  // 稍微抬高以避免z-fighting
-                    end.x, end.y, level + 0.01
+                    segment[0].x, segment[0].y, level + 0.1, // 增加更大的Z偏移
+                    segment[1].x, segment[1].y, level + 0.1
                 ]);
 
                 geometry.setAttribute('position', new THREE.BufferAttribute(vertices, 3));
 
-                const material = new THREE.LineBasicMaterial({
-                    color: 0x000000,     // 黑色线条
-                    linewidth: 2,        // 线宽
-                    transparent: false,
-                    depthWrite: true
+                // 创建白色背景线
+                const bgMaterial = new THREE.LineBasicMaterial({
+                    color: 0xFFFFFF,
+                    linewidth: 4,
+                    transparent: true,
+                    opacity: 1.0,
+                    depthTest: false,    // 禁用深度测试
+                    depthWrite: false    // 禁用深度写入
                 });
 
-                const line = new THREE.Line(geometry, material);
-                line.renderOrder = 1;    // 确保线条在渐变面之上
-                this.contourLines.add(line);
+                const bgLine = new THREE.Line(geometry, bgMaterial);
+                bgLine.renderOrder = 998;
+                linesGroup.add(bgLine);
+
+                // 创建黑色前景线
+                const fgMaterial = new THREE.LineBasicMaterial({
+                    color: 0x000000,
+                    linewidth: 2,
+                    transparent: false,
+                    depthTest: false,    // 禁用深度测试
+                    depthWrite: false    // 禁用深度写入
+                });
+
+                const fgLine = new THREE.Line(geometry, fgMaterial);
+                fgLine.renderOrder = 999;
+                linesGroup.add(fgLine);
             });
         }
 
+        this.contourLines.add(linesGroup);
         this.scene.add(this.contourLines);
+    }
+
+    connectSegments(segments) {
+        if (segments.length === 0) return [];
+        
+        const connected = [];
+        const used = new Set();
+        let currentSegment = segments[0];
+        used.add(0);
+
+        const isClose = (p1, p2) => {
+            const dx = p1.x - p2.x;
+            const dy = p1.y - p2.y;
+            return Math.sqrt(dx * dx + dy * dy) < 0.0001;
+        };
+
+        while (used.size < segments.length) {
+            let found = false;
+            for (let i = 0; i < segments.length; i++) {
+                if (used.has(i)) continue;
+
+                const segment = segments[i];
+                if (isClose(currentSegment[1], segment[0])) {
+                    connected.push(currentSegment);
+                    currentSegment = segment;
+                    used.add(i);
+                    found = true;
+                    break;
+                } else if (isClose(currentSegment[1], segment[1])) {
+                    connected.push(currentSegment);
+                    currentSegment = [segment[1], segment[0]];
+                    used.add(i);
+                    found = true;
+                    break;
+                }
+            }
+
+            if (!found) {
+                connected.push(currentSegment);
+                const nextUnused = segments.findIndex((_, i) => !used.has(i));
+                if (nextUnused >= 0) {
+                    currentSegment = segments[nextUnused];
+                    used.add(nextUnused);
+                } else {
+                    break;
+                }
+            }
+        }
+
+        if (currentSegment) {
+            connected.push(currentSegment);
+        }
+
+        return connected;
     }
 
     findIntersections(cell, x, y, dx, dy, level) {
