@@ -143,6 +143,7 @@ class ThreeContourRenderer {
         const dx = this.data.x[1] - this.data.x[0];
         const dy = this.data.y[1] - this.data.y[0];
 
+        // 遍历每个等值线级别
         for (const level of this.data.levels) {
             const segments = [];
 
@@ -159,15 +160,17 @@ class ThreeContourRenderer {
                     const x = this.data.x[j];
                     const y = this.data.y[i];
 
-                    const intersections = this.findIntersections(cell, x, y, dx, dy, level);
-                    if (intersections.length === 2) {
-                        segments.push(intersections);
+                    const cellSegments = this.findIntersections(cell, x, y, dx, dy, level);
+                    if (Array.isArray(cellSegments) && cellSegments.length > 0) {
+                        segments.push(...cellSegments);
                     }
                 }
             }
 
+            // 连接线段
             const connectedSegments = this.connectSegments(segments);
             
+            // 创建线条
             connectedSegments.forEach(segment => {
                 const geometry = new THREE.BufferGeometry();
                 const vertices = new Float32Array([
@@ -177,23 +180,24 @@ class ThreeContourRenderer {
 
                 geometry.setAttribute('position', new THREE.BufferAttribute(vertices, 3));
 
+                // 创建白色线条
                 const material = new THREE.LineBasicMaterial({
                     color: 0xFFFFFF,
                     linewidth: 2,
-                    transparent: true,
+                    transparent: false,
                     opacity: 1.0,
-                    depthTest: true,
+                    depthTest: false,
                     depthWrite: false,
                     side: THREE.DoubleSide
                 });
 
                 const line = new THREE.Line(geometry, material);
-                line.renderOrder = 1;
+                line.renderOrder = 999;  // 确保线条在最上层
                 this.contourLines.add(line);
             });
         }
 
-        this.contourLines.renderOrder = 1;
+        this.contourLines.renderOrder = 999;
         this.scene.add(this.contourLines);
     }
 
@@ -202,50 +206,77 @@ class ThreeContourRenderer {
         
         const connected = [];
         const used = new Set();
-        let currentSegment = segments[0];
-        used.add(0);
-
+        
+        const TOLERANCE = 0.01;
+        
+        // 判断两点是否可以连接
         const isClose = (p1, p2) => {
             const dx = p1.x - p2.x;
             const dy = p1.y - p2.y;
-            return Math.sqrt(dx * dx + dy * dy) < 0.0001;
+            return Math.sqrt(dx * dx + dy * dy) < TOLERANCE;
         };
 
+        // 计算线段方向
+        const getDirection = (seg) => {
+            return Math.atan2(seg[1].y - seg[0].y, seg[1].x - seg[0].x);
+        };
+
+        // 查找最佳连接
+        const findBestConnection = (currentSeg) => {
+            let bestIdx = -1;
+            let bestAngleDiff = Math.PI;
+            let shouldReverse = false;
+            const currentDir = getDirection(currentSeg);
+
+            segments.forEach((seg, idx) => {
+                if (used.has(idx)) return;
+
+                // 检查两个可能的连接方向
+                if (isClose(currentSeg[1], seg[0])) {
+                    const angleDiff = Math.abs(currentDir - getDirection(seg));
+                    if (angleDiff < bestAngleDiff) {
+                        bestAngleDiff = angleDiff;
+                        bestIdx = idx;
+                        shouldReverse = false;
+                    }
+                }
+                if (isClose(currentSeg[1], seg[1])) {
+                    const angleDiff = Math.abs(currentDir - getDirection([seg[1], seg[0]]));
+                    if (angleDiff < bestAngleDiff) {
+                        bestAngleDiff = angleDiff;
+                        bestIdx = idx;
+                        shouldReverse = true;
+                    }
+                }
+            });
+
+            return bestIdx === -1 ? null : {
+                segment: segments[bestIdx],
+                index: bestIdx,
+                reverse: shouldReverse
+            };
+        };
+
+        // 构建路径
         while (used.size < segments.length) {
-            let found = false;
-            for (let i = 0; i < segments.length; i++) {
-                if (used.has(i)) continue;
+            const startIdx = segments.findIndex((_, i) => !used.has(i));
+            if (startIdx === -1) break;
 
-                const segment = segments[i];
-                if (isClose(currentSegment[1], segment[0])) {
-                    connected.push(currentSegment);
-                    currentSegment = segment;
-                    used.add(i);
-                    found = true;
-                    break;
-                } else if (isClose(currentSegment[1], segment[1])) {
-                    connected.push(currentSegment);
-                    currentSegment = [segment[1], segment[0]];
-                    used.add(i);
-                    found = true;
-                    break;
+            let currentPath = [segments[startIdx]];
+            used.add(startIdx);
+
+            let foundConnection = true;
+            while (foundConnection) {
+                foundConnection = false;
+                const conn = findBestConnection(currentPath[currentPath.length - 1]);
+                if (conn) {
+                    used.add(conn.index);
+                    currentPath.push(conn.reverse ? [conn.segment[1], conn.segment[0]] : conn.segment);
+                    foundConnection = true;
                 }
             }
 
-            if (!found) {
-                connected.push(currentSegment);
-                const nextUnused = segments.findIndex((_, i) => !used.has(i));
-                if (nextUnused >= 0) {
-                    currentSegment = segments[nextUnused];
-                    used.add(nextUnused);
-                } else {
-                    break;
-                }
-            }
-        }
-
-        if (currentSegment) {
-            connected.push(currentSegment);
+            connected.push(...currentPath);
         }
 
         return connected;
@@ -260,17 +291,37 @@ class ThreeContourRenderer {
             { p1: [x, y + dy], p2: [x, y], v1: cell[3], v2: cell[0] }          // 左边
         ];
 
+        // 计算中心点值
+        const centerValue = (cell[0] + cell[1] + cell[2] + cell[3]) / 4;
+
         edges.forEach(edge => {
             if ((edge.v1 < level && edge.v2 >= level) || (edge.v1 >= level && edge.v2 < level)) {
                 const t = (level - edge.v1) / (edge.v2 - edge.v1);
                 intersections.push({
                     x: edge.p1[0] + t * (edge.p2[0] - edge.p1[0]),
-                    y: edge.p1[1] + t * (edge.p2[1] - edge.p1[1])
+                    y: edge.p1[1] + t * (edge.p2[1] - edge.p1[1]),
+                    value: level
                 });
             }
         });
 
-        return intersections;
+        // 处理鞍点情况
+        if (intersections.length === 4) {
+            // 根据中心点值决定连接方式
+            if (centerValue > level) {
+                return [
+                    [intersections[0], intersections[3]],
+                    [intersections[1], intersections[2]]
+                ];
+            } else {
+                return [
+                    [intersections[0], intersections[1]],
+                    [intersections[2], intersections[3]]
+                ];
+            }
+        }
+
+        return intersections.length === 2 ? [intersections] : [];
     }
 
     addLabel(position, value) {
