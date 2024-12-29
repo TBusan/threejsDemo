@@ -1,0 +1,92 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <title>Three.js Contour</title>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, user-scalable=no, minimum-scale=1.0, maximum-scale=1.0">
+    <style>
+        body {
+            margin: 0;
+        }
+
+        #container {
+            position: absolute;
+            left: 0;
+            top: 0;
+            right: 0;
+            bottom: 0;
+            width: 800px;
+            height: 600px;
+        }
+    </style>
+</head>
+
+<body>
+    <div id="container"></div>
+
+    <script type="importmap">
+        {
+            "imports": {
+                "three": "../../../build/three.module.js",
+                "three/addons/": "../../../examples/jsm/"
+            }
+        }
+    </script>
+
+    <script type="module">
+        import * as THREE from 'three';
+        import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+        import { ThreeContourRenderer } from './ThreeContourRenderer.js';
+
+        // 创建测试数据
+        const data = {
+            x: Array.from({ length: 50 }, (_, i) => i - 25),
+            y: Array.from({ length: 50 }, (_, i) => i - 25),
+            z: Array.from({ length: 50 }, (_, i) =>
+                Array.from({ length: 50 }, (_, j) => {
+                    const x = i - 25;
+                    const y = j - 25;
+                    return Math.sin(Math.sqrt(x * x + y * y) * 0.2);
+                })
+            ),
+            levels: [-0.8, -0.6, -0.4, -0.2, 0, 0.2, 0.4, 0.6, 0.8]
+        };
+
+        // 创建容器
+        const container = document.createElement('div');
+        document.body.appendChild(container);
+
+        // 创建渲染器
+        const renderer = new ThreeContourRenderer(container, data, {
+            width: 800,
+            height: 600,
+            colorScale: 'viridis',
+            lineWidth: 2,
+            showSurface: true,
+            surfaceOpacity: 0.5,
+            showLabels: true,
+            labelSize: 0.5,
+            smoothing: 0.2
+        });
+
+        // 动态更新示例
+        setInterval(() => {
+            const newData = {
+                ...data,
+                z: data.z.map(row =>
+                    row.map(val => val + (Math.random() - 0.5) * 0.1)
+                )
+            };
+            renderer.update(newData);
+        }, 1000);
+
+        // 响应窗口大小变化
+        window.addEventListener('resize', () => {
+            renderer.resize(window.innerWidth, window.innerHeight);
+        });
+    </script>
+
+</body>
+
+</html>
