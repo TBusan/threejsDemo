@@ -19,33 +19,37 @@ class ThreeContourRenderer {
 
         // 初始化 Three.js
         this.scene = new THREE.Scene();
-        this.camera = new THREE.PerspectiveCamera(
-            75,
-            this.options.width / this.options.height,
+        this.scene.background = new THREE.Color(0x000000);  // 黑色背景
+
+        // 使用正交相机代替透视相机
+        const aspect = this.options.width / this.options.height;
+        const frustumSize = 10;
+        this.camera = new THREE.OrthographicCamera(
+            -frustumSize * aspect / 2,
+            frustumSize * aspect / 2,
+            frustumSize / 2,
+            -frustumSize / 2,
             0.1,
             1000
         );
+        this.camera.position.set(0, 0, 10);
+        this.camera.lookAt(0, 0, 0);
 
         this.renderer = new THREE.WebGLRenderer({ antialias: true });
         this.renderer.setSize(this.options.width, this.options.height);
         container.appendChild(this.renderer.domElement);
 
-        // 添加轨道控制器
-        this.controls = new OrbitControls(
-            this.camera,
-            this.renderer.domElement
-        );
+        // 修改控制器设置
+        this.controls = new OrbitControls(this.camera, this.renderer.domElement);
+        this.controls.enableRotate = false;  // 禁用旋转
+        this.controls.enableZoom = true;     // 允许缩放
+        this.controls.enablePan = true;      // 允许平移
+        this.controls.screenSpacePanning = true;  // 使用屏幕空间平移
 
         // 初始化组件
         this.contourLines = new THREE.Group();
         this.labels = new THREE.Group();
         this.surface = null;
-
-        // 设置相机位置
-        this.camera.position.set(0, 0, 20);
-
-        // 添加光源
-        this.addLights();
 
         // 创建初始内容
         this.createContent();
@@ -93,15 +97,15 @@ class ThreeContourRenderer {
         let minZ = Infinity;
         let maxZ = -Infinity;
 
-        // 使用实际的物理坐标
+        // 使用实际的物理坐标，但z坐标设为0（平面）
         for (let i = 0; i < this.data.y.length; i++) {
             for (let j = 0; j < this.data.x.length; j++) {
                 const index = (i * this.data.x.length + j) * 3;
                 const z = this.data.z[i][j];
 
-                positions[index] = this.data.x[j];
-                positions[index + 1] = this.data.y[i];
-                positions[index + 2] = z;
+                positions[index] = this.data.x[j] - width/2;     // 居中
+                positions[index + 1] = this.data.y[i] - height/2;// 居中
+                positions[index + 2] = 0;                        // 平面
 
                 minZ = Math.min(minZ, z);
                 maxZ = Math.max(maxZ, z);
@@ -110,7 +114,7 @@ class ThreeContourRenderer {
 
         // 设置颜色
         for (let i = 0; i < positions.length / 3; i++) {
-            const z = positions[i * 3 + 2];
+            const z = this.data.z[Math.floor(i / this.data.x.length)][i % this.data.x.length];
             const color = ContourUtils.getColorForValue(z, minZ, maxZ, this.options.colorScale);
             colors[i * 3] = color.r;
             colors[i * 3 + 1] = color.g;
@@ -119,7 +123,7 @@ class ThreeContourRenderer {
 
         geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
 
-        const material = new THREE.MeshPhongMaterial({
+        const material = new THREE.MeshBasicMaterial({  // 使用BasicMaterial
             vertexColors: true,
             side: THREE.DoubleSide,
             transparent: true,
@@ -167,8 +171,8 @@ class ThreeContourRenderer {
             connectedSegments.forEach(segment => {
                 const geometry = new THREE.BufferGeometry();
                 const vertices = new Float32Array([
-                    segment[0].x, segment[0].y, level + 0.01,
-                    segment[1].x, segment[1].y, level + 0.01
+                    segment[0].x - width/2, segment[0].y - height/2, 0.01,
+                    segment[1].x - width/2, segment[1].y - height/2, 0.01
                 ]);
 
                 geometry.setAttribute('position', new THREE.BufferAttribute(vertices, 3));
