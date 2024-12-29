@@ -139,14 +139,13 @@ class ThreeContourRenderer {
 
     createContourLines() {
         this.contourLines.clear();
+        this.labels.clear();  // 清除旧的标签
 
-        // 计算实际的物理尺寸
         const width = this.data.x[this.data.x.length - 1] - this.data.x[0];
         const height = this.data.y[this.data.y.length - 1] - this.data.y[0];
         const dx = this.data.x[1] - this.data.x[0];
         const dy = this.data.y[1] - this.data.y[0];
 
-        // 遍历每个等值线级别
         for (const level of this.data.levels) {
             const segments = [];
 
@@ -170,11 +169,11 @@ class ThreeContourRenderer {
                 }
             }
 
-            // 连接线段
             const connectedSegments = this.connectSegments(segments);
             
-            // 创建线条
-            connectedSegments.forEach(segment => {
+            // 为每个连接的线段组添加标签
+            connectedSegments.forEach((segment, index) => {
+                // 创建线条
                 const geometry = new THREE.BufferGeometry();
                 const vertices = new Float32Array([
                     segment[0].x - width/2, segment[0].y - height/2, 0.01,
@@ -183,7 +182,6 @@ class ThreeContourRenderer {
 
                 geometry.setAttribute('position', new THREE.BufferAttribute(vertices, 3));
 
-                // 创建白色线条
                 const material = new THREE.LineBasicMaterial({
                     color: 0xFFFFFF,
                     linewidth: 2,
@@ -195,13 +193,58 @@ class ThreeContourRenderer {
                 });
 
                 const line = new THREE.Line(geometry, material);
-                line.renderOrder = 999;  // 确保线条在最上层
+                line.renderOrder = 999;
                 this.contourLines.add(line);
+
+                // 计算线段长度
+                const segmentLength = Math.hypot(
+                    segment[1].x - segment[0].x,
+                    segment[1].y - segment[0].y
+                );
+
+                // 只在较长的线段上添加标签，并且控制标签密度
+                const MIN_LENGTH = 0.5;  // 最小线段长度阈值
+                if (segmentLength > MIN_LENGTH && index % 3 === 0) {  // 增加间隔，减少标签密度
+                    const midPoint = {
+                        x: (segment[0].x + segment[1].x) / 2 - width/2,
+                        y: (segment[0].y + segment[1].y) / 2 - height/2,
+                        z: 0.01
+                    };
+
+                    // 创建标签
+                    const canvas = document.createElement('canvas');
+                    const context = canvas.getContext('2d');
+                    canvas.width = 64;
+                    canvas.height = 32;
+
+                    // 绘制文本
+                    context.fillStyle = 'white';
+                    context.font = '16px Arial';
+                    context.textAlign = 'center';
+                    context.textBaseline = 'middle';
+                    context.fillText(level.toFixed(1), canvas.width/2, canvas.height/2);
+
+                    const texture = new THREE.CanvasTexture(canvas);
+                    const spriteMaterial = new THREE.SpriteMaterial({
+                        map: texture,
+                        transparent: true,
+                        depthTest: false,
+                        depthWrite: false
+                    });
+
+                    const sprite = new THREE.Sprite(spriteMaterial);
+                    sprite.position.set(midPoint.x, midPoint.y, midPoint.z);
+                    sprite.scale.set(0.4, 0.2, 1);
+                    sprite.renderOrder = 1000;
+
+                    this.labels.add(sprite);
+                }
             });
         }
 
         this.contourLines.renderOrder = 999;
         this.scene.add(this.contourLines);
+        this.scene.add(this.labels);
     }
 
     connectSegments(segments) {
