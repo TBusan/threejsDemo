@@ -58,6 +58,16 @@ class ThreeContourRenderer {
 
         // 开始渲染循环
         this.render();
+
+        // 添加鼠标交互相关的属性
+        this.container = container;
+        this.raycaster = new THREE.Raycaster();
+        this.mouse = new THREE.Vector2();
+        this.hoveredPoint = null;
+        this.hoverLabel = null;
+
+        // 添加鼠标移动事件监听
+        this.container.addEventListener('mousemove', this.onMouseMove.bind(this));
     }
 
     addLights() {
@@ -97,36 +107,49 @@ class ThreeContourRenderer {
         const positions = geometry.attributes.position.array;
         const colors = new Float32Array(positions.length);
 
-        let minZ = Infinity;
-        let maxZ = -Infinity;
+        // 获取数据范围
+        const values = this.data.z.flat();
+        const minZ = Math.min(...values);
+        const maxZ = Math.max(...values);
 
-        // 使用实际的物理坐标，但z坐标设为0（平面）
+        // 为每个顶点设置位置和初始颜色
         for (let i = 0; i < this.data.y.length; i++) {
             for (let j = 0; j < this.data.x.length; j++) {
                 const index = (i * this.data.x.length + j) * 3;
                 const z = this.data.z[i][j];
 
-                positions[index] = this.data.x[j] - width/2;     // 居中
-                positions[index + 1] = this.data.y[i] - height/2;// 居中
-                positions[index + 2] = 0;                        // 平面
+                positions[index] = this.data.x[j] - width/2;
+                positions[index + 1] = this.data.y[i] - height/2;
+                positions[index + 2] = 0;
 
-                minZ = Math.min(minZ, z);
-                maxZ = Math.max(maxZ, z);
+                // 找到z值所在的等值线区间
+                let level1 = this.data.levels[0];
+                let level2 = this.data.levels[this.data.levels.length - 1];
+                
+                for (let k = 0; k < this.data.levels.length - 1; k++) {
+                    if (z >= this.data.levels[k] && z < this.data.levels[k + 1]) {
+                        level1 = this.data.levels[k];
+                        level2 = this.data.levels[k + 1];
+                        break;
+                    }
+                }
+
+                // 计算在区间内的颜色
+                const t = (z - level1) / (level2 - level1);
+                const levelIndex1 = this.data.levels.indexOf(level1);
+                const levelIndex2 = this.data.levels.indexOf(level2);
+                const colorT = (levelIndex1 + t) / (this.data.levels.length - 1);
+
+                const color = ContourUtils.getColorForValue(colorT, 0, 1, this.options.colorScale);
+                colors[index] = color.r;
+                colors[index + 1] = color.g;
+                colors[index + 2] = color.b;
             }
-        }
-
-        // 设置颜色
-        for (let i = 0; i < positions.length / 3; i++) {
-            const z = this.data.z[Math.floor(i / this.data.x.length)][i % this.data.x.length];
-            const color = ContourUtils.getColorForValue(z, minZ, maxZ, this.options.colorScale);
-            colors[i * 3] = color.r;
-            colors[i * 3 + 1] = color.g;
-            colors[i * 3 + 2] = color.b;
         }
 
         geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
 
-        const material = new THREE.MeshBasicMaterial({  // 使用BasicMaterial
+        const material = new THREE.MeshBasicMaterial({
             vertexColors: true,
             side: THREE.DoubleSide,
             transparent: true,
@@ -457,6 +480,9 @@ class ThreeContourRenderer {
             }
             this.scene.remove(object);
         }
+
+        this.container.removeEventListener('mousemove', this.onMouseMove);
+        this.removeHoverLabel();
     }
 
     createColorBar() {
@@ -527,6 +553,131 @@ class ThreeContourRenderer {
         }
 
         this.group.add(colorBar);
+    }
+
+    // 添加鼠标移动处理方法
+    onMouseMove(event) {
+        // 计算鼠标在归一化设备坐标中的位置
+        const rect = this.container.getBoundingClientRect();
+        this.mouse.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
+        this.mouse.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
+
+        // 更新射线
+        this.raycaster.setFromCamera(this.mouse, this.camera);
+
+        // 检测与平面的交点
+        if (this.surface) {
+            const intersects = this.raycaster.intersectObject(this.surface);
+            
+            if (intersects.length > 0) {
+                const point = intersects[0].point;
+                
+                // 计算对应的数据值
+                const width = this.data.x[this.data.x.length - 1] - this.data.x[0];
+                const height = this.data.y[this.data.y.length - 1] - this.data.y[0];
+                
+                const adjustedX = point.x + width/2;
+                const adjustedY = point.y + height/2;
+                
+                // 计算在数据网格中的位置
+                const xRatio = (adjustedX - this.data.x[0]) / (this.data.x[this.data.x.length - 1] - this.data.x[0]);
+                const yRatio = (adjustedY - this.data.y[0]) / (this.data.y[this.data.y.length - 1] - this.data.y[0]);
+                
+                // 计算数据索引和插值权重
+                const xIndex = Math.min(Math.max(0, Math.floor(xRatio * (this.data.x.length - 1))), this.data.x.length - 2);
+                const yIndex = Math.min(Math.max(0, Math.floor(yRatio * (this.data.y.length - 1))), this.data.y.length - 2);
+                
+                const xFrac = xRatio * (this.data.x.length - 1) - xIndex;
+                const yFrac = yRatio * (this.data.y.length - 1) - yIndex;
+                
+                // 双线性插值计算精确值
+                const v00 = this.data.z[yIndex][xIndex];
+                const v10 = this.data.z[yIndex][xIndex + 1];
+                const v01 = this.data.z[yIndex + 1][xIndex];
+                const v11 = this.data.z[yIndex + 1][xIndex + 1];
+                
+                const value = (1 - xFrac) * (1 - yFrac) * v00 +
+                             xFrac * (1 - yFrac) * v10 +
+                             (1 - xFrac) * yFrac * v01 +
+                             xFrac * yFrac * v11;
+
+                // 找到值所在的等值线区间
+                let level1 = this.data.levels[0];
+                let level2 = this.data.levels[this.data.levels.length - 1];
+                
+                for (let i = 0; i < this.data.levels.length - 1; i++) {
+                    if (value >= this.data.levels[i] && value < this.data.levels[i + 1]) {
+                        level1 = this.data.levels[i];
+                        level2 = this.data.levels[i + 1];
+                        break;
+                    }
+                }
+
+                // 确保值在正确的区间内
+                const clampedValue = Math.max(level1, Math.min(level2, value));
+
+                // 更新或创建悬停标签
+                this.updateHoverLabel(point, clampedValue);
+            } else {
+                this.removeHoverLabel();
+            }
+        }
+    }
+
+    // 更新悬停标签
+    updateHoverLabel(position, value) {
+        if (!this.hoverLabel) {
+            // 创建标签
+            const canvas = document.createElement('canvas');
+            const context = canvas.getContext('2d');
+            canvas.width = 64;
+            canvas.height = 32;
+
+            // 绘制文本
+            context.fillStyle = 'white';
+            context.font = '16px Arial';
+            context.textAlign = 'center';
+            context.textBaseline = 'middle';
+            context.fillText(value.toFixed(1), canvas.width/2, canvas.height/2);
+
+            const texture = new THREE.CanvasTexture(canvas);
+            const spriteMaterial = new THREE.SpriteMaterial({
+                map: texture,
+                transparent: true,
+                depthTest: false,
+                depthWrite: false
+            });
+
+            this.hoverLabel = new THREE.Sprite(spriteMaterial);
+            this.hoverLabel.scale.set(0.4, 0.2, 1);
+            this.hoverLabel.renderOrder = 2000;  // 确保在最上层
+            this.scene.add(this.hoverLabel);
+        } else {
+            // 更新标签内容
+            const canvas = this.hoverLabel.material.map.image;
+            const context = canvas.getContext('2d');
+            context.clearRect(0, 0, canvas.width, canvas.height);
+            context.fillStyle = 'white';
+            context.font = '16px Arial';
+            context.textAlign = 'center';
+            context.textBaseline = 'middle';
+            context.fillText(value.toFixed(1), canvas.width/2, canvas.height/2);
+            this.hoverLabel.material.map.needsUpdate = true;
+        }
+
+        // 更新标签位置
+        this.hoverLabel.position.copy(position);
+        this.hoverLabel.position.z += 0.1;  // 稍微抬高以确保可见
+    }
+
+    // 移除悬停标签
+    removeHoverLabel() {
+        if (this.hoverLabel) {
+            this.scene.remove(this.hoverLabel);
+            this.hoverLabel.material.dispose();
+            this.hoverLabel.material.map.dispose();
+            this.hoverLabel = null;
+        }
     }
 }
 
