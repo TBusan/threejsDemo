@@ -50,6 +50,8 @@ class ThreeContourRenderer {
         this.contourLines = new THREE.Group();
         this.labels = new THREE.Group();
         this.surface = null;
+        this.group = new THREE.Group();
+        this.scene.add(this.group);
 
         // 创建初始内容
         this.createContent();
@@ -72,6 +74,7 @@ class ThreeContourRenderer {
             this.createSurface();
         }
         this.createContourLines();
+        this.createColorBar();
 
         if (this.options.showLabels) {
             this.scene.add(this.labels);
@@ -411,6 +414,76 @@ class ThreeContourRenderer {
             }
             this.scene.remove(object);
         }
+    }
+
+    createColorBar() {
+        // 色带的尺寸和位置
+        const barWidth = 0.5;
+        const barHeight = 8;
+        const barX = 5;  // 放在右侧
+        const barY = 0;
+
+        // 创建色带几何体
+        const geometry = new THREE.PlaneGeometry(barWidth, barHeight, 1, this.data.levels.length - 1);
+        const positions = geometry.attributes.position.array;
+        const colors = new Float32Array(positions.length);
+
+        // 获取数据范围
+        const values = this.data.z.flat();
+        const minZ = Math.min(...values);
+        const maxZ = Math.max(...values);
+
+        // 为每个顶点设置颜色
+        for (let i = 0; i < positions.length / 3; i++) {
+            const row = Math.floor(i / 2);  // 每行2个顶点
+            const t = 1 - (row / (this.data.levels.length - 1));  // 从上到下递减
+            const color = ContourUtils.getColorForValue(t, 0, 1, this.options.colorScale);
+            
+            colors[i * 3] = color.r;
+            colors[i * 3 + 1] = color.g;
+            colors[i * 3 + 2] = color.b;
+        }
+
+        geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+
+        const material = new THREE.MeshBasicMaterial({
+            vertexColors: true,
+            side: THREE.DoubleSide
+        });
+
+        const colorBar = new THREE.Mesh(geometry, material);
+        colorBar.position.set(barX, barY, 0);
+
+        // 添加刻度标签
+        for (let i = 0; i < this.data.levels.length; i++) {
+            const value = this.data.levels[i];
+            const y = barY + barHeight/2 - (i / (this.data.levels.length - 1)) * barHeight;
+            
+            const canvas = document.createElement('canvas');
+            const context = canvas.getContext('2d');
+            canvas.width = 64;
+            canvas.height = 32;
+
+            context.fillStyle = 'white';
+            context.font = '16px Arial';
+            context.textAlign = 'left';
+            context.textBaseline = 'middle';
+            context.fillText(value.toFixed(1), 4, canvas.height/2);
+
+            const texture = new THREE.CanvasTexture(canvas);
+            const spriteMaterial = new THREE.SpriteMaterial({
+                map: texture,
+                transparent: true
+            });
+
+            const sprite = new THREE.Sprite(spriteMaterial);
+            sprite.position.set(barX + barWidth/2 + 0.5, y, 0);
+            sprite.scale.set(0.5, 0.25, 1);
+            
+            this.group.add(sprite);
+        }
+
+        this.group.add(colorBar);
     }
 }
 
