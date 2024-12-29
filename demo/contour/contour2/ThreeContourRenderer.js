@@ -702,6 +702,24 @@ class ThreeContourRenderer {
             }
         };
     }
+
+    // 添加一个方法来切换渐变背景的显示
+    toggleSurface(show) {
+        this.options.showSurface = show;
+        
+        // 移除现有的表面（如果存在）
+        if (this.surface) {
+            this.scene.remove(this.surface);
+            this.surface.geometry.dispose();
+            this.surface.material.dispose();
+            this.surface = null;
+        }
+
+        // 如果需要显示，则创建新的表面
+        if (show) {
+            this.createSurface();
+        }
+    }
 }
 
 export {ThreeContourRenderer};
