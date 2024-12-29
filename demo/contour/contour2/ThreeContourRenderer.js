@@ -75,9 +75,13 @@ class ThreeContourRenderer {
     }
 
     createSurface() {
+        // 计算实际的物理尺寸
+        const width = this.data.x[this.data.x.length - 1] - this.data.x[0];
+        const height = this.data.y[this.data.y.length - 1] - this.data.y[0];
+
         const geometry = new THREE.PlaneGeometry(
-            this.data.x.length - 1,
-            this.data.y.length - 1,
+            width,
+            height,
             this.data.x.length - 1,
             this.data.y.length - 1
         );
@@ -89,12 +93,16 @@ class ThreeContourRenderer {
         let minZ = Infinity;
         let maxZ = -Infinity;
 
+        // 使用实际的物理坐标
         for (let i = 0; i < this.data.y.length; i++) {
             for (let j = 0; j < this.data.x.length; j++) {
                 const index = (i * this.data.x.length + j) * 3;
                 const z = this.data.z[i][j];
 
+                positions[index] = this.data.x[j];
+                positions[index + 1] = this.data.y[i];
                 positions[index + 2] = z;
+
                 minZ = Math.min(minZ, z);
                 maxZ = Math.max(maxZ, z);
             }
@@ -103,52 +111,33 @@ class ThreeContourRenderer {
         // 设置颜色
         for (let i = 0; i < positions.length / 3; i++) {
             const z = positions[i * 3 + 2];
-            const color = ContourUtils.getColorForValue(
-                z,
-                minZ,
-                maxZ,
-                this.options.colorScale
-            );
-
+            const color = ContourUtils.getColorForValue(z, minZ, maxZ, this.options.colorScale);
             colors[i * 3] = color.r;
             colors[i * 3 + 1] = color.g;
             colors[i * 3 + 2] = color.b;
         }
 
-        geometry.setAttribute(
-            'color',
-            new THREE.BufferAttribute(colors, 3)
-        );
+        geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
 
         const material = new THREE.MeshPhongMaterial({
             vertexColors: true,
             side: THREE.DoubleSide,
             transparent: true,
-            opacity: this.options.surfaceOpacity,
-            depthWrite: true,
-            renderOrder: 0
+            opacity: this.options.surfaceOpacity
         });
 
         this.surface = new THREE.Mesh(geometry, material);
-        this.surface.renderOrder = 0;
         this.scene.add(this.surface);
     }
 
     createContourLines() {
         this.contourLines.clear();
 
-        const values = this.data.z.flat();
-        const minZ = Math.min(...values);
-        const maxZ = Math.max(...values);
-
+        // 计算实际的物理尺寸
         const width = this.data.x[this.data.x.length - 1] - this.data.x[0];
         const height = this.data.y[this.data.y.length - 1] - this.data.y[0];
-        const dx = width / (this.data.x.length - 1);
-        const dy = height / (this.data.y.length - 1);
-
-        // 创建一个组来存放所有线条
-        const linesGroup = new THREE.Group();
-        linesGroup.renderOrder = 999;
+        const dx = this.data.x[1] - this.data.x[0];
+        const dy = this.data.y[1] - this.data.y[0];
 
         for (const level of this.data.levels) {
             const segments = [];
@@ -176,45 +165,31 @@ class ThreeContourRenderer {
             const connectedSegments = this.connectSegments(segments);
             
             connectedSegments.forEach(segment => {
-                // 创建线条几何体
                 const geometry = new THREE.BufferGeometry();
                 const vertices = new Float32Array([
-                    segment[0].x, segment[0].y, level + 0.1, // 增加更大的Z偏移
-                    segment[1].x, segment[1].y, level + 0.1
+                    segment[0].x, segment[0].y, level + 0.01,
+                    segment[1].x, segment[1].y, level + 0.01
                 ]);
 
                 geometry.setAttribute('position', new THREE.BufferAttribute(vertices, 3));
 
-                // 创建白色背景线
-                const bgMaterial = new THREE.LineBasicMaterial({
+                const material = new THREE.LineBasicMaterial({
                     color: 0xFFFFFF,
-                    linewidth: 4,
+                    linewidth: 2,
                     transparent: true,
                     opacity: 1.0,
-                    depthTest: false,    // 禁用深度测试
-                    depthWrite: false    // 禁用深度写入
+                    depthTest: true,
+                    depthWrite: false,
+                    side: THREE.DoubleSide
                 });
 
-                const bgLine = new THREE.Line(geometry, bgMaterial);
-                bgLine.renderOrder = 998;
-                linesGroup.add(bgLine);
-
-                // 创建黑色前景线
-                const fgMaterial = new THREE.LineBasicMaterial({
-                    color: 0x000000,
-                    linewidth: 2,
-                    transparent: false,
-                    depthTest: false,    // 禁用深度测试
-                    depthWrite: false    // 禁用深度写入
-                });
-
-                const fgLine = new THREE.Line(geometry, fgMaterial);
-                fgLine.renderOrder = 999;
-                linesGroup.add(fgLine);
+                const line = new THREE.Line(geometry, material);
+                line.renderOrder = 1;
+                this.contourLines.add(line);
             });
         }
 
-        this.contourLines.add(linesGroup);
+        this.contourLines.renderOrder = 1;
         this.scene.add(this.contourLines);
     }
 
