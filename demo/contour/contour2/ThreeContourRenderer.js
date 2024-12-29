@@ -134,194 +134,88 @@ class ThreeContourRenderer {
     createContourLines() {
         this.contourLines.clear();
 
+        // 获取数据范围用于颜色映射
+        const values = this.data.z.flat();
+        const minZ = Math.min(...values);
+        const maxZ = Math.max(...values);
+
+        // 计算实际的物理尺寸
+        const width = this.data.x[this.data.x.length - 1] - this.data.x[0];
+        const height = this.data.y[this.data.y.length - 1] - this.data.y[0];
+        const dx = width / (this.data.x.length - 1);
+        const dy = height / (this.data.y.length - 1);
+
+        // 为每个等值线级别生成线段
         for (const level of this.data.levels) {
-            const lines = this.generateContourLines(level);
+            const segments = [];
 
-            for (const line of lines) {
-                const geometry = new THREE.BufferGeometry();
+            // 遍历网格生成等值线段
+            for (let i = 0; i < this.data.y.length - 1; i++) {
+                for (let j = 0; j < this.data.x.length - 1; j++) {
+                    const cell = [
+                        this.data.z[i][j],
+                        this.data.z[i][j + 1],
+                        this.data.z[i + 1][j + 1],
+                        this.data.z[i + 1][j]
+                    ];
 
-                // 转换点数组为顶点
-                const vertices = new Float32Array(line.length * 3);
-                for (let i = 0; i < line.length; i++) {
-                    vertices[i * 3] = line[i].x;
-                    vertices[i * 3 + 1] = line[i].y;
-                    vertices[i * 3 + 2] = level;
-                }
+                    const x = this.data.x[j];
+                    const y = this.data.y[i];
 
-                geometry.setAttribute(
-                    'position',
-                    new THREE.BufferAttribute(vertices, 3)
-                );
-
-                const material = new THREE.LineBasicMaterial({
-                    color: ContourUtils.getColorForValue(
-                        level,
-                        Math.min(...this.data.levels),
-                        Math.max(...this.data.levels),
-                        this.options.colorScale
-                    ),
-                    linewidth: this.options.lineWidth
-                });
-
-                const contourLine = new THREE.Line(geometry, material);
-                this.contourLines.add(contourLine);
-
-                if (this.options.showLabels) {
-                    this.addLabel(
-                        line[Math.floor(line.length / 2)],
-                        level
-                    );
+                    // 计算等值线与网格边的交点
+                    const intersections = this.findIntersections(cell, x, y, dx, dy, level);
+                    if (intersections.length === 2) {
+                        segments.push(intersections);
+                    }
                 }
             }
+
+            // 创建等值线几何体
+            segments.forEach(([start, end]) => {
+                const geometry = new THREE.BufferGeometry();
+                const vertices = new Float32Array([
+                    start.x, start.y, level + 0.01,  // 稍微抬高以避免z-fighting
+                    end.x, end.y, level + 0.01
+                ]);
+
+                geometry.setAttribute('position', new THREE.BufferAttribute(vertices, 3));
+
+                const material = new THREE.LineBasicMaterial({
+                    color: 0x000000,     // 黑色线条
+                    linewidth: 2,        // 线宽
+                    transparent: false,
+                    depthWrite: true
+                });
+
+                const line = new THREE.Line(geometry, material);
+                line.renderOrder = 1;    // 确保线条在渐变面之上
+                this.contourLines.add(line);
+            });
         }
 
         this.scene.add(this.contourLines);
     }
 
-    generateContourLines(level) {
-        const lines = [];
-        const rows = this.data.z.length - 1;
-        const cols = this.data.z[0].length - 1;
-
-        for (let i = 0; i < rows; i++) {
-            for (let j = 0; j < cols; j++) {
-                const cell = [
-                    this.data.z[i][j],
-                    this.data.z[i][j + 1],
-                    this.data.z[i + 1][j + 1],
-                    this.data.z[i + 1][j]
-                ];
-
-                const segments = this.processCell(cell, i, j, level);
-                if (segments.length > 0) {
-                    lines.push(segments);
-                }
-            }
-        }
-
-        return this.connectLines(lines);
-    }
-
-    connectLines(lines) {
-        const connected = [];
-        const used = new Set();
-
-        const getLineKey = line => line.map(p => `${p.x},${p.y}`).join('|');
-        
-        const canConnect = (line1, line2) => {
-            const last = line1[line1.length - 1];
-            const first = line2[0];
-            
-            const dx = last.x - first.x;
-            const dy = last.y - first.y;
-            
-            // 如果两点距离足够近，认为可以连接
-            return Math.sqrt(dx * dx + dy * dy) < 0.1;
-        };
-
-        lines.forEach(line => {
-            const lineKey = getLineKey(line);
-            if (used.has(lineKey)) return;
-
-            const newLine = [...line];
-            used.add(lineKey);
-
-            let changed = true;
-            while (changed) {
-                changed = false;
-
-                for (const candidate of lines) {
-                    const candidateKey = getLineKey(candidate);
-                    if (used.has(candidateKey)) continue;
-
-                    if (canConnect(newLine, candidate)) {
-                        newLine.push(...candidate);
-                        used.add(candidateKey);
-                        changed = true;
-                    }
-                }
-            }
-
-            connected.push(newLine);
-        });
-
-        return connected;
-    }
-
-    processCell(cell, row, col, level) {
-        // 计算案例索引
-        let caseIndex = 0;
-        for (let i = 0; i < 4; i++) {
-            if (cell[i] >= level) {
-                caseIndex |= (1 << i);
-            }
-        }
-
-        // Marching Squares 查找表
-        const CASE_TABLE = {
-            0: [],
-            1: [[0, 3]],
-            2: [[0, 1]],
-            3: [[1, 3]],
-            4: [[1, 2]],
-            5: [[0, 1], [2, 3]],
-            6: [[0, 2]],
-            7: [[2, 3]],
-            8: [[2, 3]],
-            9: [[0, 2]],
-            10: [[0, 3], [1, 2]],
-            11: [[1, 2]],
-            12: [[1, 3]],
-            13: [[0, 1]],
-            14: [[0, 3]],
-            15: []
-        };
-
-        const edges = CASE_TABLE[caseIndex] || [];
-        const points = [];
-
-        // 边的顶点位置
-        const edgeVertices = [
-            { x: col + 0.5, y: row },      // top
-            { x: col + 1, y: row + 0.5 },  // right
-            { x: col + 0.5, y: row + 1 },  // bottom
-            { x: col, y: row + 0.5 }       // left
+    findIntersections(cell, x, y, dx, dy, level) {
+        const intersections = [];
+        const edges = [
+            { p1: [x, y], p2: [x + dx, y], v1: cell[0], v2: cell[1] },         // 上边
+            { p1: [x + dx, y], p2: [x + dx, y + dy], v1: cell[1], v2: cell[2] },   // 右边
+            { p1: [x + dx, y + dy], p2: [x, y + dy], v1: cell[2], v2: cell[3] },   // 下边
+            { p1: [x, y + dy], p2: [x, y], v1: cell[3], v2: cell[0] }          // 左边
         ];
 
-        // 计算每条边的交点
-        edges.forEach(([e1, e2]) => {
-            const v1 = cell[e1];
-            const v2 = cell[e2];
-            const t = (level - v1) / (v2 - v1);
-
-            const p1 = edgeVertices[e1];
-            const p2 = edgeVertices[e2];
-
-            points.push({
-                x: p1.x + t * (p2.x - p1.x),
-                y: p1.y + t * (p2.y - p1.y),
-                z: level
-            });
+        edges.forEach(edge => {
+            if ((edge.v1 < level && edge.v2 >= level) || (edge.v1 >= level && edge.v2 < level)) {
+                const t = (level - edge.v1) / (edge.v2 - edge.v1);
+                intersections.push({
+                    x: edge.p1[0] + t * (edge.p2[0] - edge.p1[0]),
+                    y: edge.p1[1] + t * (edge.p2[1] - edge.p1[1])
+                });
+            }
         });
 
-        return points;
-    }
-
-    processCell(cell, row, col, level) {
-        // 计算案例索引
-        let caseIndex = 0;
-        for (let i = 0; i < 4; i++) {
-            if (cell[i] >= level) {
-                caseIndex |= (1 << i);
-            }
-        }
-
-        // 获取线段配置
-        const segments = [];
-        // ... 根据 caseIndex 添加适当的线段
-        // 这里需要实现完整的 Marching Squares 算法
-
-        return segments;
+        return intersections;
     }
 
     addLabel(position, value) {
