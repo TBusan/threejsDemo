@@ -49,19 +49,26 @@ class SceneManager {
         // this.controls.dampingFactor = 0.05;
 
         // 配置缩放
-        this.controls.enableZoom = true;
-        this.controls.zoomSpeed = 2.0;
-        this.controls.minDistance = 0.0001;
-        this.controls.maxDistance = 10000;
+        // this.controls.enableZoom = true;
+        // this.controls.zoomSpeed = 2.0;
+        // this.controls.minDistance = 0.0001;
+        // this.controls.maxDistance = 10000;
 
         // 配置旋转
-        this.controls.enableRotate = true;
+        // this.controls.enableRotate = true;
         // this.controls.rotateSpeed = 1.0;
 
         // 配置平移
-        this.controls.enablePan = true;
+        // this.controls.enablePan = true;
         // this.controls.panSpeed = 1.0;
         // this.controls.screenSpacePanning = true;
+
+
+        this.controls.target.set( 0, 0.5, 0 );
+        this.controls.update();
+        this.controls.enablePan = true;
+        this.controls.enableDamping = true;
+        this.controls.enableZoom = true;
     }
 
     addLights() {
@@ -91,6 +98,7 @@ class SceneManager {
         requestAnimationFrame(this.animate.bind(this));
         this.controls.update();
         this.renderer.render(this.scene, this.camera);
+
     }
 
     // 控制器相关方法
