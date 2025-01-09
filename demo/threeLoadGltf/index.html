@@ -51,6 +51,14 @@
 			#transform-controls button:hover {
 				background: #1976d2;
 			}
+
+			#clipping-transform-controls button {
+				background: #2196f3;
+			}
+
+			#clipping-transform-controls button:hover {
+				background: #1976d2;
+			}
 		</style>
 	</head>
 
@@ -81,6 +89,10 @@
 			<div id="clipping-controls">
 				<button id="clipping-btn">开启剖切</button>
 				<button id="toggle-plane-btn" style="display: none;">隐藏剖切面</button>
+				<div id="clipping-transform-controls" style="display: none;">
+					<button id="clipping-translate-btn">平移剖切面</button>
+					<button id="clipping-rotate-btn">旋转剖切面</button>
+				</div>
 			</div>
 		</div>
 		<script type="importmap">
@@ -248,15 +260,26 @@
 			// 添加剖切控制按钮的事件监听
 			const clippingBtn = document.getElementById('clipping-btn');
 			const togglePlaneBtn = document.getElementById('toggle-plane-btn');
+			const clippingTransformControls = document.getElementById('clipping-transform-controls');
 
 			clippingBtn.addEventListener('click', () => {
 				const buttonText = sceneManager.getClippingState() ? '开启剖切' : '关闭剖切';
 				clippingBtn.textContent = buttonText;
 				sceneManager.toggleClipping();
 				
-				// 控制显示/隐藏剖切面按钮的可见性
+				// 控制按钮的可见性
 				togglePlaneBtn.style.display = sceneManager.getClippingState() ? 'inline-block' : 'none';
+					clippingTransformControls.style.display = sceneManager.getClippingState() ? 'block' : 'none';
 				togglePlaneBtn.textContent = '隐藏剖切面';
+			});
+
+			// 添加剖切面变换控制按钮的事件监听
+			document.getElementById('clipping-translate-btn').addEventListener('click', () => {
+				sceneManager.setClippingMode('translate');
+			});
+
+			document.getElementById('clipping-rotate-btn').addEventListener('click', () => {
+				sceneManager.setClippingMode('rotate');
 			});
 
 			// 添加显示/隐藏剖切面按钮的事件监听

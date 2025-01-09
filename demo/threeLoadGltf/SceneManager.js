@@ -18,6 +18,7 @@ class SceneManager {
         this.isClipping = false;
         this.isPlaneVisible = true; // 添加剖切面可见性状态
         this.clippingChangeHandler = null; // 添加变量存储事件处理函数
+        this.clippingMode = 'translate'; // 添加剖切面控制模式
         this.init();
     }
 
@@ -353,7 +354,7 @@ class SceneManager {
 
             // 使用现有的变换控制器
             this.transformControls.attach(this.planeHelper);
-            this.transformControls.setMode('translate');
+            this.transformControls.setMode(this.clippingMode);
 
             // 创建事件处理函数并保存引用
             this.clippingChangeHandler = () => {
@@ -460,6 +461,19 @@ class SceneManager {
     // 获取剖切面可见性状态
     getPlaneVisibility() {
         return this.isPlaneVisible;
+    }
+
+    // 添加设置剖切面控制模式的方法
+    setClippingMode(mode) {
+        if (!this.planeHelper || !this.isClipping) return;
+        
+        this.clippingMode = mode;
+        this.transformControls.setMode(mode);
+    }
+
+    // 获取当前剖切面控制模式
+    getClippingMode() {
+        return this.clippingMode;
     }
 }
 
