@@ -12,8 +12,8 @@ class SceneManager {
         this.isSelectMode = false;
         this.raycaster = new THREE.Raycaster();
         this.mouse = new THREE.Vector2();
+        this.transformControls = null;
         this.init();
-        // this.setupSelectionControls();
     }
 
     init() {
@@ -42,11 +42,25 @@ class SceneManager {
         this.controls = new OrbitControls(this.camera, this.renderer.domElement);
         this.setupControls();
 
-        // 添加选择管理器
-        // 假设你已经有了camera和renderer
+        // 创建变换控制器
         this.transformControls = new TransformControls(this.camera, this.renderer.domElement);
+        this.transformControls.enabled = false;
         this.scene.add(this.transformControls.getHelper());
-      
+
+        // 防止变换控制器被射线检测到
+        // this.transformControls.traverse((obj) => {
+        //     obj.layers.set(1);
+        // });
+
+        // 当变换控制器在使用时禁用 OrbitControls
+        this.transformControls.addEventListener('dragging-changed', (event) => {
+            this.controls.enabled = !event.value;
+        });
+
+        // 设置射线检测只检测默认层
+        this.raycaster.layers.set(0);
+
+        this.setupSelectionControls();
 
         // 添加光源
         this.addLights();
@@ -56,39 +70,36 @@ class SceneManager {
 
         // 开始动画循环
         this.animate();
-
-        // 当变换控制器在使用时禁用 OrbitControls
-        this.transformControls.addEventListener('dragging-changed', (event) => {
-            this.controls.enabled = !event.value;
-        });
     }
 
     setupControls() {
         // 启用阻尼效果
-        // this.controls.enableDamping = true;
-        // this.controls.dampingFactor = 0.05;
+        this.controls.enableDamping = true;
+        this.controls.dampingFactor = 0.05;
 
         // 配置缩放
-        // this.controls.enableZoom = true;
-        // this.controls.zoomSpeed = 2.0;
+        this.controls.enableZoom = true;
+        this.controls.zoomSpeed = 2.0;
         // this.controls.minDistance = 0.0001;
         // this.controls.maxDistance = 10000;
 
         // 配置旋转
-        // this.controls.enableRotate = true;
-        // this.controls.rotateSpeed = 1.0;
+        this.controls.enableRotate = true;
+        this.controls.rotateSpeed = 1.0;
 
         // 配置平移
-        // this.controls.enablePan = true;
-        // this.controls.panSpeed = 1.0;
-        // this.controls.screenSpacePanning = true;
-
-
-        this.controls.target.set( 0, 0.5, 0 );
-        this.controls.update();
         this.controls.enablePan = true;
-        this.controls.enableDamping = true;
-        this.controls.enableZoom = true;
+        this.controls.panSpeed = 1.0;
+        this.controls.screenSpacePanning = true;
+
+        this.controls.update();
+
+
+        // this.controls.target.set( 0, 0.5, 0 );
+        // this.controls.update();
+        // this.controls.enablePan = true;
+        // this.controls.enableDamping = true;
+        // this.controls.enableZoom = true;
     }
 
     addLights() {
@@ -141,12 +152,6 @@ class SceneManager {
         if (options.maxPolarAngle !== undefined) this.controls.maxPolarAngle = options.maxPolarAngle;
         if (options.minAzimuthAngle !== undefined) this.controls.minAzimuthAngle = options.minAzimuthAngle;
         if (options.maxAzimuthAngle !== undefined) this.controls.maxAzimuthAngle = options.maxAzimuthAngle;
-    }
-
-    setTransformControlsModel(model) {
-        // debugger
-        // let attachModel = model.children[0];
-        this.transformControls.attach(model);
     }
 
     // 资源清理
@@ -229,44 +234,10 @@ class SceneManager {
     }
 
     setupSelectionControls() {
-        // 选择按钮
-        const selectBtn = document.getElementById('select-btn');
-        const transformControls = document.getElementById('transform-controls');
-
-        selectBtn.addEventListener('click', () => {
-            this.isSelectMode = !this.isSelectMode;
-            selectBtn.textContent = this.isSelectMode ? '退出选择' : '选择模型';
-            transformControls.style.display = this.isSelectMode ? 'block' : 'none';
-            
-            if (!this.isSelectMode && this.selectedObject) {
-                this.transformControls.detach();
-                this.selectedObject = null;
-            }
-        });
-
-        // 变换控制按钮
-        document.getElementById('translate-btn').addEventListener('click', () => {
-            if (this.selectedObject) {
-                this.transformControls.setMode('translate');
-            }
-        });
-
-        document.getElementById('rotate-btn').addEventListener('click', () => {
-            if (this.selectedObject) {
-                this.transformControls.setMode('rotate');
-            }
-        });
-
-        document.getElementById('scale-btn').addEventListener('click', () => {
-            if (this.selectedObject) {
-                this.transformControls.setMode('scale');
-            }
-        });
-
-        // 点击选择物体
         this.renderer.domElement.addEventListener('click', (event) => {
             debugger
             if (!this.isSelectMode) return;
+            
 
             // 计算鼠标位置
             const rect = this.renderer.domElement.getBoundingClientRect();
@@ -276,43 +247,66 @@ class SceneManager {
             // 发射射线
             this.raycaster.setFromCamera(this.mouse, this.camera);
 
+            // 只获取场景中的模型，排除 TransformControls
+            // const models = this.scene.children.filter(child => 
+            //     child.type === 'Group' && child !== this.transformControls
+            // );
+
+            const models = this.scene.children.filter(child => 
+                child.type === 'Group'
+            );
+
             // 获取相交的物体
-            const intersects = this.raycaster.intersectObjects(this.scene.children, true);
+            const intersects = this.raycaster.intersectObjects(models, true);
 
             if (intersects.length > 0) {
-                // 查找第一个网格物体
-                let selectedMesh = null;
-                for (const intersect of intersects) {
-                    if (intersect.object.type === 'Mesh') {
-                        selectedMesh = intersect.object;
-                        break;
-                    }
+                const selectedMesh = intersects[0].object;
+                
+                // 查找模型根节点
+                let modelRoot = selectedMesh;
+                while (modelRoot.parent && modelRoot.parent !== this.scene) {
+                    modelRoot = modelRoot.parent;
                 }
 
-                if (selectedMesh) {
-                    // 查找模型根节点
-                    let modelRoot = selectedMesh;
-                    while (modelRoot.parent && modelRoot.parent !== this.scene) {
-                        modelRoot = modelRoot.parent;
-                    }
-
-                    // 如果点击了已选中的物体，则取消选择
-                    if (this.selectedObject === modelRoot) {
+                // 如果点击了已选中的物体，则取消选择
+                if (this.selectedObject === modelRoot) {
+                    this.transformControls.enabled = false;
+                    this.transformControls.detach();
+                    this.selectedObject = null;
+                } else {
+                    // 先分离之前的物体
+                    if (this.selectedObject) {
                         this.transformControls.detach();
-                        this.selectedObject = null;
-                    } else {
-                        if (this.selectedObject) {
-                            this.transformControls.detach();
-                        }
-                        this.selectedObject = modelRoot;
-                        this.transformControls.attach(this.selectedObject);
                     }
+                    
+                    // 延迟一帧再附加新物体
+                    requestAnimationFrame(() => {
+                        this.selectedObject = modelRoot;
+                        this.transformControls.enabled = true;
+                        this.transformControls.attach(this.selectedObject);
+                    });
                 }
             } else if (this.selectedObject) {
+                this.transformControls.enabled = false;
                 this.transformControls.detach();
                 this.selectedObject = null;
             }
         });
+    }
+
+    toggleSelectMode(isSelectMode) {
+        this.isSelectMode = isSelectMode;
+        if (!this.isSelectMode && this.selectedObject) {
+            this.transformControls.enabled = false;
+            this.transformControls.detach();
+            this.selectedObject = null;
+        }
+    }
+
+    setTransformMode(mode) {
+        if (this.selectedObject && this.transformControls.enabled) {
+            this.transformControls.setMode(mode);
+        }
     }
 }
 
