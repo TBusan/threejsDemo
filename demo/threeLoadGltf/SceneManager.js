@@ -405,42 +405,15 @@ class SceneManager {
         this.clippingPlane.normal.copy(normal);
         this.clippingPlane.constant = -position.dot(normal);
 
-        // 检查每个模型是否与剖切平面相交
+        // 遍历场景中的所有网格
         this.scene.traverse((node) => {
             if (node.isMesh && node !== this.planeHelper) {
-                // 计算模型的包围盒
-                const box = new THREE.Box3().setFromObject(node);
-                
-                // 获取包围盒的八个顶点
-                const points = [
-                    new THREE.Vector3(box.min.x, box.min.y, box.min.z),
-                    new THREE.Vector3(box.min.x, box.min.y, box.max.z),
-                    new THREE.Vector3(box.min.x, box.max.y, box.min.z),
-                    new THREE.Vector3(box.min.x, box.max.y, box.max.z),
-                    new THREE.Vector3(box.max.x, box.min.y, box.min.z),
-                    new THREE.Vector3(box.max.x, box.min.y, box.max.z),
-                    new THREE.Vector3(box.max.x, box.max.y, box.min.z),
-                    new THREE.Vector3(box.max.x, box.max.y, box.max.z)
-                ];
-
-                // 检查是否有点在平面的两侧
-                let hasPositive = false;
-                let hasNegative = false;
-
-                for (const point of points) {
-                    const distance = this.clippingPlane.distanceToPoint(point);
-                    if (distance > 0) hasPositive = true;
-                    if (distance < 0) hasNegative = true;
-                    if (hasPositive && hasNegative) break;
-                }
-
-                // 只有当平面与模型相交时才应用剖切
-                if (hasPositive && hasNegative) {
+                // 确保材质已经设置了剖切平面
+                if (!node.material.clippingPlanes || node.material.clippingPlanes.length === 0) {
                     node.material.clippingPlanes = [this.clippingPlane];
-                } else {
-                    node.material.clippingPlanes = [];
+                    node.material.clipShadows = true;
+                    node.material.needsUpdate = true;
                 }
-                node.material.needsUpdate = true;
             }
         });
     }
