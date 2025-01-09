@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+import { DRACOLoader } from 'three/addons/loaders/DRACOLoader.js';
 
 class GltfLoader {
     constructor(scene, camera, controls) {
@@ -19,8 +20,12 @@ class GltfLoader {
         };
 
         const finalOptions = { ...defaultOptions, ...options };
-        const loader = new GLTFLoader();
 
+
+        // const dracoLoader = new DRACOLoader();
+        // dracoLoader.setDecoderPath( './gltfDraco/' );
+        const loader = new GLTFLoader();
+        // loader.setDRACOLoader( dracoLoader );
         loader.load(
             modelPath,
             (gltf) => {
