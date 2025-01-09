@@ -13,6 +13,10 @@ class SceneManager {
         this.raycaster = new THREE.Raycaster();
         this.mouse = new THREE.Vector2();
         this.transformControls = null;
+        this.clippingPlane = null;
+        this.planeHelper = null;
+        this.isClipping = false;
+        this.clippingChangeHandler = null; // 添加变量存储事件处理函数
         this.init();
     }
 
@@ -44,7 +48,7 @@ class SceneManager {
 
         // 创建变换控制器
         this.transformControls = new TransformControls(this.camera, this.renderer.domElement);
-        this.transformControls.enabled = false;
+        // this.transformControls.enabled = false;
         this.scene.add(this.transformControls.getHelper());
 
         // 防止变换控制器被射线检测到
@@ -67,6 +71,9 @@ class SceneManager {
 
         // 添加窗口大小变化监听
         window.addEventListener('resize', this.onWindowResize.bind(this));
+
+        // 启用渲染器的剖切功能
+        this.renderer.localClippingEnabled = true;
 
         // 开始动画循环
         this.animate();
@@ -307,6 +314,138 @@ class SceneManager {
         if (this.selectedObject && this.transformControls.enabled) {
             this.transformControls.setMode(mode);
         }
+    }
+
+    // 添加剖切功能
+    toggleClipping() {
+        this.isClipping = !this.isClipping;
+
+        if (this.isClipping) {
+            // 创建剖切平面，使用平面的法向量
+            this.clippingPlane = new THREE.Plane(new THREE.Vector3(0, 0, 1), 0);
+
+            // 创建可视化平面
+            const planeGeometry = new THREE.PlaneGeometry(5, 5);
+            const planeMaterial = new THREE.MeshBasicMaterial({
+                color: 0xff0000,
+                side: THREE.DoubleSide,
+                transparent: true,
+                opacity: 0.5,
+                depthTest: false,
+                depthWrite: false
+            });
+            this.planeHelper = new THREE.Mesh(planeGeometry, planeMaterial);
+            
+            // 设置平面初始位置
+            this.planeHelper.position.set(0, 0, 0);
+            this.scene.add(this.planeHelper);
+
+            // 为所有模型添加剖切平面
+            this.scene.traverse((node) => {
+                if (node.isMesh && node !== this.planeHelper) { // 排除剖切平面自身
+                    node.material = node.material.clone();
+                    node.material.clippingPlanes = [this.clippingPlane];
+                    node.material.clipShadows = true;
+                    node.material.needsUpdate = true;
+                }
+            });
+
+            // 使用现有的变换控制器
+            this.transformControls.attach(this.planeHelper);
+            this.transformControls.setMode('translate');
+
+            // 创建事件处理函数并保存引用
+            this.clippingChangeHandler = () => {
+                this.updateClippingPlane();
+            };
+
+            // 添加事件监听
+            this.transformControls.addEventListener('change', this.clippingChangeHandler);
+
+            // 初始更新一次剖切平面
+            this.updateClippingPlane();
+        } else {
+            // 移除事件监听
+            if (this.clippingChangeHandler) {
+                this.transformControls.removeEventListener('change', this.clippingChangeHandler);
+                this.clippingChangeHandler = null;
+            }
+
+            // 移除剖切平面
+            if (this.planeHelper) {
+                this.scene.remove(this.planeHelper);
+                this.transformControls.detach();
+                this.planeHelper = null;
+            }
+
+            // 移除所有模型的剖切平面
+            this.scene.traverse((node) => {
+                if (node.isMesh) {
+                    node.material.clippingPlanes = [];
+                    node.material.needsUpdate = true;
+                }
+            });
+        }
+    }
+
+    updateClippingPlane() {
+        if (!this.planeHelper || !this.clippingPlane) return;
+
+        // 获取平面的位置
+        const position = new THREE.Vector3();
+        this.planeHelper.getWorldPosition(position);
+        
+        // 计算平面的法向量（垂直于平面的方向）
+        const normal = new THREE.Vector3(0, 0, 1);  // 平面的默认法向量
+        normal.transformDirection(this.planeHelper.matrixWorld);  // 应用平面的世界变换
+
+        // 更新剖切平面
+        this.clippingPlane.normal.copy(normal);
+        this.clippingPlane.constant = -position.dot(normal);
+
+        // 检查每个模型是否与剖切平面相交
+        this.scene.traverse((node) => {
+            if (node.isMesh && node !== this.planeHelper) {
+                // 计算模型的包围盒
+                const box = new THREE.Box3().setFromObject(node);
+                
+                // 获取包围盒的八个顶点
+                const points = [
+                    new THREE.Vector3(box.min.x, box.min.y, box.min.z),
+                    new THREE.Vector3(box.min.x, box.min.y, box.max.z),
+                    new THREE.Vector3(box.min.x, box.max.y, box.min.z),
+                    new THREE.Vector3(box.min.x, box.max.y, box.max.z),
+                    new THREE.Vector3(box.max.x, box.min.y, box.min.z),
+                    new THREE.Vector3(box.max.x, box.min.y, box.max.z),
+                    new THREE.Vector3(box.max.x, box.max.y, box.min.z),
+                    new THREE.Vector3(box.max.x, box.max.y, box.max.z)
+                ];
+
+                // 检查是否有点在平面的两侧
+                let hasPositive = false;
+                let hasNegative = false;
+
+                for (const point of points) {
+                    const distance = this.clippingPlane.distanceToPoint(point);
+                    if (distance > 0) hasPositive = true;
+                    if (distance < 0) hasNegative = true;
+                    if (hasPositive && hasNegative) break;
+                }
+
+                // 只有当平面与模型相交时才应用剖切
+                if (hasPositive && hasNegative) {
+                    node.material.clippingPlanes = [this.clippingPlane];
+                } else {
+                    node.material.clippingPlanes = [];
+                }
+                node.material.needsUpdate = true;
+            }
+        });
+    }
+
+    // 获取当前剖切状态
+    getClippingState() {
+        return this.isClipping;
     }
 }
 

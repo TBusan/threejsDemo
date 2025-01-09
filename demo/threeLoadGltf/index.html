@@ -78,6 +78,9 @@
 				<button id="spread-y-btn">Y轴分散</button>
 				<button id="spread-z-btn">Z轴分散</button>
 			</div>
+			<div id="clipping-controls">
+				<button id="clipping-btn">开启剖切</button>
+			</div>
 		</div>
 		<script type="importmap">
 			{
@@ -239,6 +242,13 @@
 
 			document.getElementById("scale-btn").addEventListener("click", () => {
 				sceneManager.setTransformMode("scale");
+			});
+
+			// 添加剖切控制按钮的事件监听
+			document.getElementById('clipping-btn').addEventListener('click', () => {
+				const buttonText = sceneManager.getClippingState() ? '开启剖切' : '关闭剖切';
+				document.getElementById('clipping-btn').textContent = buttonText;
+				sceneManager.toggleClipping();
 			});
 		</script>
 	</body>
