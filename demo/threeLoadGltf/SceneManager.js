@@ -352,6 +352,7 @@ class SceneManager {
                 }
             });
 
+            this.transformControls.enabled = true;
             // 使用现有的变换控制器
             this.transformControls.attach(this.planeHelper);
             this.transformControls.setMode(this.clippingMode);
@@ -369,6 +370,7 @@ class SceneManager {
         } else {
             // 移除事件监听
             if (this.clippingChangeHandler) {
+                this.transformControls.enabled = false;
                 this.transformControls.removeEventListener('change', this.clippingChangeHandler);
                 this.clippingChangeHandler = null;
             }
