@@ -63,6 +63,11 @@
 				<button id="rotate-btn">旋转</button>
 				<button id="scale-btn">缩放</button>
 			</div>
+			<div id="spread-controls">
+				<button id="spread-x-btn">X轴分散</button>
+				<button id="spread-y-btn">Y轴分散</button>
+				<button id="spread-z-btn">Z轴分散</button>
+			</div>
 		</div>
 		<script type="importmap">
 			{
@@ -176,6 +181,25 @@
 						sceneManager.togglePan(!sceneManager.controls.enablePan);
 						break;
 				}
+			});
+
+			// 添加分散控制按钮的事件监听
+			document.getElementById('spread-x-btn').addEventListener('click', () => {
+				const buttonText = sceneManager.getSpreadState() ? 'X轴分散' : '恢复位置';
+				document.getElementById('spread-x-btn').textContent = buttonText;
+				sceneManager.spreadModels('x');
+			});
+
+			document.getElementById('spread-y-btn').addEventListener('click', () => {
+				const buttonText = sceneManager.getSpreadState() ? 'Y轴分散' : '恢复位置';
+				document.getElementById('spread-y-btn').textContent = buttonText;
+				sceneManager.spreadModels('y');
+			});
+
+			document.getElementById('spread-z-btn').addEventListener('click', () => {
+				const buttonText = sceneManager.getSpreadState() ? 'Z轴分散' : '恢复位置';
+				document.getElementById('spread-z-btn').textContent = buttonText;
+				sceneManager.spreadModels('z');
 			});
 		</script>
 	</body>

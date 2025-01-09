@@ -5,6 +5,9 @@ import { TransformControls } from 'three/addons/controls/TransformControls.js';
 class SceneManager {
     constructor(container) {
         this.container = container;
+        this.originalPositions = new Map(); // 存储模型的原始位置
+        this.isSpread = false;  // 跟踪当前是否处于分散状态
+        this.spreadDistance = 2; // 分散距离
         this.init();
     }
 
@@ -155,6 +158,63 @@ class SceneManager {
     // 获取控制器
     getControls() {
         return this.controls;
+    }
+
+    // 添加模型分散方法
+    spreadModels(axis = 'x') {
+        // 获取场景中的所有模型
+        const models = this.scene.children.filter(child => 
+            child.type === 'Group' && child !== this.transformControls
+        );
+
+        if (models.length === 0) return;
+
+        // 如果还没有存储原始位置，就存储它们
+        if (this.originalPositions.size === 0) {
+            models.forEach(model => {
+                this.originalPositions.set(model, model.position.clone());
+            });
+        }
+
+        // 根据是否已经分散来决定动作
+        if (!this.isSpread) {
+            // 计算每个模型的新位置
+            models.forEach((model, index) => {
+                const offset = new THREE.Vector3();
+                const position = index - (models.length - 1) / 2; // 使模型居中分布
+
+                // 根据指定轴设置偏移
+                switch(axis.toLowerCase()) {
+                    case 'x':
+                        offset.x = position * this.spreadDistance;
+                        break;
+                    case 'y':
+                        offset.y = position * this.spreadDistance;
+                        break;
+                    case 'z':
+                        offset.z = position * this.spreadDistance;
+                        break;
+                }
+
+                // 应用偏移
+                model.position.copy(offset);
+            });
+            this.isSpread = true;
+        } else {
+            // 恢复原始位置
+            models.forEach(model => {
+                const originalPos = this.originalPositions.get(model);
+                if (originalPos) {
+                    model.position.copy(originalPos);
+                }
+            });
+            this.isSpread = false;
+        }
+    }
+
+    // 获取当前分散状态
+    getSpreadState() {
+        return this.isSpread;
     }
 }
 
