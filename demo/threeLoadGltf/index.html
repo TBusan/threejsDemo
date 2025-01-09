@@ -24,11 +24,46 @@
 				height: 100vh;
                 overflow: hidden;
 			}
+
+            /* 添加按钮样式 */
+            #control-panel button {
+                margin: 5px;
+                padding: 8px 15px;
+                background: #4CAF50;
+                color: white;
+                border: none;
+                border-radius: 4px;
+                cursor: pointer;
+            }
+
+            #control-panel button:hover {
+                background: #45a049;
+            }
+
+            #control-panel button:active {
+                background: #3d8b40;
+            }
+
+            #transform-controls button {
+                background: #2196F3;
+            }
+
+            #transform-controls button:hover {
+                background: #1976D2;
+            }
 		</style>
 	</head>
 
 	<body>
 		<div id="container"></div>
+		<div id="control-panel" style="position: fixed; top: 10px; right: 10px; background: rgba(255,255,255,0.8); padding: 10px; border-radius: 5px;">
+			<button id="select-btn">选择模型</button>
+			<div id="transform-controls" style="display: none;">
+				<button id="translate-btn">平移</button>
+				<button id="rotate-btn">旋转</button>
+				<button id="scale-btn">缩放</button>
+			</div>
+		</div>
 		<script type="importmap">
 			{
 				"imports": {
@@ -56,24 +91,26 @@
 			);
 
 			// 加载模型
-			let modelUrl1 = './data/faultage.glb';
-			let modelUrl2 = './data/15.glb';
-			let modelUrl3 = './data/3.glb';
+			let modelUrl1 = './data/faultage_1.glb';
+			let modelUrl2 = './data/15_1.glb';
+			let modelUrl3 = './data/3_1.glb';
 
 			gltfLoader.loadModel(modelUrl1, {
-				position: new THREE.Vector3(0, 0.5, 0),
-				scale: 0.001,
+				// position: new THREE.Vector3(-2, 0.5, 0),  // 调整位置，让模型分开
+				// scale: 0.001,
 				onProgress: (path, progress) => {
 					console.log(`Loading ${path}: ${progress * 100}%`);
 				},
 				onComplete: (model) => {
-					console.log('Model loaded successfully');
-					sceneManager.setControlLimits({
-						minDistance: 2,
-						maxDistance: 20,
-						minPolarAngle: 0,
-						maxPolarAngle: Math.PI / 2,
-					});
+					model.name = 'Model1';  // 添加名称以便识别
+					console.log('Model 1 loaded successfully');
+					// sceneManager.setControlLimits({
+					// 	minDistance: 2,
+					// 	maxDistance: 20,
+					// 	minPolarAngle: 0,
+					// 	maxPolarAngle: Math.PI / 2,
+					// });
+                    sceneManager.setTransformControlsModel(model);
 				},
 				onError: (path, error) => {
 					console.error(`Failed to load ${path}:`, error);
@@ -82,19 +119,21 @@
 
 
 			gltfLoader.loadModel(modelUrl2, {
-				position: new THREE.Vector3(0, 0.5, 0),
-				scale: 0.001,
+				// position: new THREE.Vector3(-2, 0.5, 0),  // 调整位置，让模型分开
+				// scale: 0.001,
 				onProgress: (path, progress) => {
 					console.log(`Loading ${path}: ${progress * 100}%`);
 				},
 				onComplete: (model) => {
-					console.log('Model loaded successfully');
-					sceneManager.setControlLimits({
-						minDistance: 2,
-						maxDistance: 20,
-						minPolarAngle: 0,
-						maxPolarAngle: Math.PI / 2,
-					});
+					model.name = 'Model2';  // 添加名称以便识别
+					console.log('Model 2 loaded successfully');
+					// sceneManager.setControlLimits({
+					// 	minDistance: 2,
+					// 	maxDistance: 20,
+					// 	minPolarAngle: 0,
+					// 	maxPolarAngle: Math.PI / 2,
+					// });
+                    sceneManager.setTransformControlsModel(model);
 				},
 				onError: (path, error) => {
 					console.error(`Failed to load ${path}:`, error);
@@ -103,19 +142,21 @@
 
 			
 			gltfLoader.loadModel(modelUrl3, {
-				position: new THREE.Vector3(0, 0.5, 0),
-				scale: 0.001,
+				// position: new THREE.Vector3(-2, 0.5, 0),  // 调整位置，让模型分开
+				// scale: 0.001,
 				onProgress: (path, progress) => {
 					console.log(`Loading ${path}: ${progress * 100}%`);
 				},
 				onComplete: (model) => {
-					console.log('Model loaded successfully');
-					sceneManager.setControlLimits({
-						minDistance: 2,
-						maxDistance: 20,
-						minPolarAngle: 0,
-						maxPolarAngle: Math.PI / 2,
-					});
+					model.name = 'Model3';  // 添加名称以便识别
+					console.log('Model 3 loaded successfully');
+					// sceneManager.setControlLimits({
+					// 	minDistance: 2,
+					// 	maxDistance: 20,
+					// 		minPolarAngle: 0,
+					// 		maxPolarAngle: Math.PI / 2,
+					// });
+                    sceneManager.setTransformControlsModel(model);
 				},
 				onError: (path, error) => {
 					console.error(`Failed to load ${path}:`, error);

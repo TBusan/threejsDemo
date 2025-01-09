@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import { TransformControls } from 'three/addons/controls/TransformControls.js';
 
 class SceneManager {
     constructor(container) {
@@ -32,6 +33,11 @@ class SceneManager {
         // 添加轨道控制器并配置
         this.controls = new OrbitControls(this.camera, this.renderer.domElement);
         this.setupControls();
+
+        // 添加选择管理器
+        // 假设你已经有了camera和renderer
+        this.transformControls = new TransformControls(this.camera, this.renderer.domElement);
+        this.scene.add(this.transformControls);
 
         // 添加光源
         this.addLights();
@@ -121,6 +127,12 @@ class SceneManager {
         if (options.maxPolarAngle !== undefined) this.controls.maxPolarAngle = options.maxPolarAngle;
         if (options.minAzimuthAngle !== undefined) this.controls.minAzimuthAngle = options.minAzimuthAngle;
         if (options.maxAzimuthAngle !== undefined) this.controls.maxAzimuthAngle = options.maxAzimuthAngle;
+    }
+
+    setTransformControlsModel(model) {
+        debugger
+        let attachModel = model.children[0];
+        this.transformControls.attach(model);
     }
 
     // 资源清理
