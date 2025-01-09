@@ -16,6 +16,7 @@ class SceneManager {
         this.clippingPlane = null;
         this.planeHelper = null;
         this.isClipping = false;
+        this.isPlaneVisible = true; // 添加剖切面可见性状态
         this.clippingChangeHandler = null; // 添加变量存储事件处理函数
         this.init();
     }
@@ -446,6 +447,19 @@ class SceneManager {
     // 获取当前剖切状态
     getClippingState() {
         return this.isClipping;
+    }
+
+    // 切换剖切面的可见性
+    togglePlaneVisibility() {
+        if (!this.planeHelper) return;
+        
+        this.isPlaneVisible = !this.isPlaneVisible;
+        this.planeHelper.visible = this.isPlaneVisible;
+    }
+
+    // 获取剖切面可见性状态
+    getPlaneVisibility() {
+        return this.isPlaneVisible;
     }
 }
 

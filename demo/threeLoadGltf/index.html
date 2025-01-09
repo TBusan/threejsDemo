@@ -80,6 +80,7 @@
 			</div>
 			<div id="clipping-controls">
 				<button id="clipping-btn">开启剖切</button>
+				<button id="toggle-plane-btn" style="display: none;">隐藏剖切面</button>
 			</div>
 		</div>
 		<script type="importmap">
@@ -245,10 +246,23 @@
 			});
 
 			// 添加剖切控制按钮的事件监听
-			document.getElementById('clipping-btn').addEventListener('click', () => {
+			const clippingBtn = document.getElementById('clipping-btn');
+			const togglePlaneBtn = document.getElementById('toggle-plane-btn');
+
+			clippingBtn.addEventListener('click', () => {
 				const buttonText = sceneManager.getClippingState() ? '开启剖切' : '关闭剖切';
-				document.getElementById('clipping-btn').textContent = buttonText;
+				clippingBtn.textContent = buttonText;
 				sceneManager.toggleClipping();
+				
+				// 控制显示/隐藏剖切面按钮的可见性
+				togglePlaneBtn.style.display = sceneManager.getClippingState() ? 'inline-block' : 'none';
+				togglePlaneBtn.textContent = '隐藏剖切面';
+			});
+
+			// 添加显示/隐藏剖切面按钮的事件监听
+			togglePlaneBtn.addEventListener('click', () => {
+				sceneManager.togglePlaneVisibility();
+				togglePlaneBtn.textContent = sceneManager.getPlaneVisibility() ? '隐藏剖切面' : '显示剖切面';
 			});
 		</script>
 	</body>
