@@ -1,0 +1,95 @@
+<!DOCTYPE html>
+<html lang="en">
+	<head>
+		<title>three.js webgl - animation - keyframes</title>
+		<meta charset="utf-8" />
+		<meta
+			name="viewport"
+			content="width=device-width, user-scalable=no, minimum-scale=1.0, maximum-scale=1.0"
+		/>
+		<style>
+			body {
+				background-color: #bfe3dd;
+				color: #000;
+                padding: 0;
+                overflow: hidden;
+			}
+
+			a {
+				color: #2983ff;
+			}
+
+			#container {
+				width: 100%;
+				height: 100vh;
+                overflow: hidden;
+			}
+		</style>
+	</head>
+
+	<body>
+		<div id="container"></div>
+		<script type="importmap">
+			{
+				"imports": {
+					"three": "../../../build/three.module.js",
+					"three/addons/": "../../../examples/jsm/"
+				}
+			}
+		</script>
+
+		<script type="module">
+            import * as THREE from 'three';
+			import { SceneManager } from './SceneManager.js';
+			import { GltfLoader } from './GltfLoader.js';
+
+			const container = document.getElementById('container');
+
+			// 初始化场景管理器
+			const sceneManager = new SceneManager(container);
+
+			// 创建模型加载器
+			const gltfLoader = new GltfLoader(
+				sceneManager.getScene(),
+				sceneManager.getCamera(),
+				sceneManager.getControls()
+			);
+
+			// 加载模型
+			gltfLoader.loadModel('./data/faultage.glb', {
+				position: new THREE.Vector3(0, 0.5, 0),
+				scale: 0.001,
+				onProgress: (path, progress) => {
+					console.log(`Loading ${path}: ${progress * 100}%`);
+				},
+				onComplete: (model) => {
+					console.log('Model loaded successfully');
+					sceneManager.setControlLimits({
+						minDistance: 2,
+						maxDistance: 20,
+						minPolarAngle: 0,
+						maxPolarAngle: Math.PI / 2,
+					});
+				},
+				onError: (path, error) => {
+					console.error(`Failed to load ${path}:`, error);
+				}
+			});
+
+			// 添加控制器快捷键
+			document.addEventListener('keydown', (event) => {
+				switch(event.key) {
+					case 'r':
+						sceneManager.toggleRotate(!sceneManager.controls.enableRotate);
+						break;
+					case 'z':
+						sceneManager.toggleZoom(!sceneManager.controls.enableZoom);
+						break;
+					case 'p':
+						sceneManager.togglePan(!sceneManager.controls.enablePan);
+						break;
+				}
+			});
+		</script>
+	</body>
+</html>

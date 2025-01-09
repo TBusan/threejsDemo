@@ -81,10 +81,8 @@ class ThreeContourRenderer {
     }
 
     createContent() {
-        if (this.options.showSurface) {
-            this.createSurface();
-        }
-        this.createContourLines();
+        this.createContourFills();  // 先创建填充
+        this.createContourLines();  // 再创建等值线
         this.createColorBar();
 
         if (this.options.showLabels) {
@@ -718,6 +716,167 @@ class ThreeContourRenderer {
         // 如果需要显示，则创建新的表面
         if (show) {
             this.createSurface();
+        }
+    }
+
+    createContourFills() {
+        this.contourFills = new THREE.Group();
+
+        // 计算所有等值线的最小包围框
+        let minX = Infinity, maxX = -Infinity;
+        let minY = Infinity, maxY = -Infinity;
+
+        this.data.levels.forEach(level => {
+            const segments = this.getContourSegments(level);
+            segments.forEach(segment => {
+                [segment[0], segment[1]].forEach(point => {
+                    minX = Math.min(minX, point.x);
+                    maxX = Math.max(maxX, point.x);
+                    minY = Math.min(minY, point.y);
+                    maxY = Math.max(maxY, point.y);
+                });
+            });
+        });
+
+        // 创建边界填充网格
+        const gridSize = 200;
+        const dx = (maxX - minX) / gridSize;
+        const dy = (maxY - minY) / gridSize;
+        const grid = Array(gridSize).fill().map(() => Array(gridSize).fill(-1));
+
+        // 为每个等值线区间创建填充
+        for (let k = 0; k < this.data.levels.length - 1; k++) {
+            const lowerLevel = this.data.levels[k];
+            const upperLevel = this.data.levels[k + 1];
+
+            // 获取当前区间的等值线
+            const lowerSegments = this.getContourSegments(lowerLevel);
+            const upperSegments = this.getContourSegments(upperLevel);
+
+            // 在网格上标记等值线
+            const markContourOnGrid = (segments, value) => {
+                segments.forEach(segment => {
+                    this.drawLineOnGrid(
+                        grid,
+                        segment[0], segment[1],
+                        minX, minY, dx, dy,
+                        value
+                    );
+                });
+            };
+
+            markContourOnGrid(lowerSegments, k);
+            markContourOnGrid(upperSegments, k);
+
+            // 使用边界填充算法填充区域
+            this.boundaryFill(grid, k);
+
+            // 创建填充几何体
+            const vertices = [];
+            const indices = [];
+            let vertexIndex = 0;
+
+            for (let i = 0; i < gridSize; i++) {
+                for (let j = 0; j < gridSize; j++) {
+                    if (grid[i][j] === k) {
+                        const x0 = minX + j * dx;
+                        const x1 = x0 + dx;
+                        const y0 = minY + i * dy;
+                        const y1 = y0 + dy;
+
+                        vertices.push(
+                            x0, y0, 0,
+                            x1, y0, 0,
+                            x1, y1, 0,
+                            x0, y1, 0
+                        );
+
+                        indices.push(
+                            vertexIndex, vertexIndex + 1, vertexIndex + 2,
+                            vertexIndex, vertexIndex + 2, vertexIndex + 3
+                        );
+
+                        vertexIndex += 4;
+                    }
+                }
+            }
+
+            if (vertices.length > 0) {
+                const geometry = new THREE.BufferGeometry();
+                geometry.setAttribute('position', new THREE.Float32BufferAttribute(vertices, 3));
+                geometry.setIndex(indices);
+
+                const color = ContourUtils.getColorForValue(
+                    k / (this.data.levels.length - 1),
+                    0,
+                    1,
+                    this.options.colorScale
+                );
+
+                const material = new THREE.MeshBasicMaterial({
+                    color: color,
+                    side: THREE.DoubleSide,
+                    transparent: true,
+                    opacity: 1.0,
+                    depthWrite: false,
+                    renderOrder: k
+                });
+
+                const mesh = new THREE.Mesh(geometry, material);
+                this.contourFills.add(mesh);
+            }
+        }
+
+        this.scene.add(this.contourFills);
+    }
+
+    // 在网格上绘制线段
+    drawLineOnGrid(grid, p1, p2, minX, minY, dx, dy, value) {
+        const steps = 100;
+        for (let i = 0; i <= steps; i++) {
+            const t = i / steps;
+            const x = p1.x * (1 - t) + p2.x * t;
+            const y = p1.y * (1 - t) + p2.y * t;
+            
+            const gridX = Math.floor((x - minX) / dx);
+            const gridY = Math.floor((y - minY) / dy);
+            
+            if (gridX >= 0 && gridX < grid[0].length && 
+                gridY >= 0 && gridY < grid.length) {
+                grid[gridY][gridX] = value;
+            }
+        }
+    }
+
+    // 边界填充算法
+    boundaryFill(grid, value) {
+        const stack = [];
+        const width = grid[0].length;
+        const height = grid.length;
+
+        // 找到起始点
+        for (let i = 0; i < height; i++) {
+            for (let j = 0; j < width; j++) {
+                if (grid[i][j] === value) {
+                    stack.push([i, j]);
+                    break;
+                }
+            }
+            if (stack.length > 0) break;
+        }
+
+        while (stack.length > 0) {
+            const [y, x] = stack.pop();
+            if (y < 0 || y >= height || x < 0 || x >= width || grid[y][x] !== value) {
+                continue;
+            }
+
+            grid[y][x] = value;
+
+            stack.push([y + 1, x]);
+            stack.push([y - 1, x]);
+            stack.push([y, x + 1]);
+            stack.push([y, x - 1]);
         }
     }
 }
