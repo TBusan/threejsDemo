@@ -16,8 +16,8 @@ class SceneManager {
         this.camera = new THREE.PerspectiveCamera(
             70,
             this.container.clientWidth / this.container.clientHeight,
-            0.001,
-            100000000
+            0.00001,
+            100000
         );
         this.camera.position.set(0, 5, 1000);
         this.camera.lookAt(0, 0, 0);
@@ -50,9 +50,9 @@ class SceneManager {
 
         // 配置缩放
         this.controls.enableZoom = true;
-        // this.controls.zoomSpeed = 1.0;
-        // this.controls.minDistance = 1;
-        // this.controls.maxDistance = 50;
+        this.controls.zoomSpeed = 2.0;
+        this.controls.minDistance = 0.0001;
+        this.controls.maxDistance = 10000;
 
         // 配置旋转
         this.controls.enableRotate = true;
