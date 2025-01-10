@@ -19,6 +19,7 @@ class SceneManager {
         this.isPlaneVisible = true; // 添加剖切面可见性状态
         this.clippingChangeHandler = null; // 添加变量存储事件处理函数
         this.clippingMode = 'translate'; // 添加剖切面控制模式
+        this.initialModelStates = new Map(); // 存储所有模型的初始状态
         this.init();
     }
 
@@ -449,6 +450,43 @@ class SceneManager {
     // 获取当前剖切面控制模式
     getClippingMode() {
         return this.clippingMode;
+    }
+
+    // 记录模型的初始状态
+    recordInitialState(model) {
+        if (!this.initialModelStates.has(model)) {
+            model.updateMatrix();
+            model.updateMatrixWorld(true);
+            
+            this.initialModelStates.set(model, {
+                position: model.position.clone(),
+                rotation: model.rotation.clone(),
+                scale: model.scale.clone()
+            });
+        }
+    }
+
+    // 重置所有模型到初始状态
+    resetAllModels() {
+        // 先取消当前选择
+        if (this.selectedObject) {
+            this.transformControls.detach();
+            this.selectedObject = null;
+        }
+
+        // 遍历场景中的所有模型
+        this.scene.children.forEach(child => {
+            if (child.type === 'Group') {
+                const initialState = this.initialModelStates.get(child);
+                if (initialState) {
+                    child.position.copy(initialState.position);
+                    child.rotation.copy(initialState.rotation);
+                    child.scale.copy(initialState.scale);
+                    child.updateMatrix();
+                    child.updateMatrixWorld(true);
+                }
+            }
+        });
     }
 }
 
