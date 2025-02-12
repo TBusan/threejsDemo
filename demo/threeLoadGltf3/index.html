@@ -1,0 +1,288 @@
+<!DOCTYPE html>
+<html lang="en">
+	<head>
+		<title>three.js webgl - animation - keyframes</title>
+		<meta charset="utf-8" />
+		<meta
+			name="viewport"
+			content="width=device-width, user-scalable=no, minimum-scale=1.0, maximum-scale=1.0"
+		/>
+		<style>
+			body {
+				background-color: #bfe3dd;
+				color: #000;
+				padding: 0;
+				overflow: hidden;
+			}
+
+			a {
+				color: #2983ff;
+			}
+
+			#container {
+				width: 100%;
+				height: 100vh;
+				overflow: hidden;
+			}
+
+			/* 添加按钮样式 */
+			#control-panel button {
+				margin: 5px;
+				padding: 8px 15px;
+				background: #4caf50;
+				color: white;
+				border: none;
+				border-radius: 4px;
+				cursor: pointer;
+			}
+
+			#control-panel button:hover {
+				background: #45a049;
+			}
+
+			#control-panel button:active {
+				background: #3d8b40;
+			}
+
+			#transform-controls button {
+				background: #2196f3;
+			}
+
+			#transform-controls button:hover {
+				background: #1976d2;
+			}
+
+			#clipping-transform-controls button {
+				background: #2196f3;
+			}
+
+			#clipping-transform-controls button:hover {
+				background: #1976d2;
+			}
+
+			#reset-all-btn {
+				background: #f44336;
+				margin: 5px;
+				padding: 8px 15px;
+				color: white;
+				border: none;
+				border-radius: 4px;
+				cursor: pointer;
+			}
+
+			#reset-all-btn:hover {
+				background: #d32f2f;
+			}
+		</style>
+	</head>
+
+	<body>
+		<div id="container"></div>
+		<div
+			id="control-panel"
+			style="
+				position: fixed;
+				top: 10px;
+				right: 10px;
+				background: rgba(255, 255, 255, 0.8);
+				padding: 10px;
+				border-radius: 5px;
+			"
+		>
+			<button id="select-btn">选择模型</button>
+			<div id="transform-controls" style="display: none">
+				<button id="translate-btn">平移</button>
+				<button id="rotate-btn">旋转</button>
+				<button id="scale-btn">缩放</button>
+			</div>
+			<button id="reset-all-btn">恢复原样</button>
+			<div id="spread-controls">
+				<button id="spread-x-btn">X轴分散</button>
+				<button id="spread-y-btn">Y轴分散</button>
+				<button id="spread-z-btn">Z轴分散</button>
+			</div>
+			<div id="clipping-controls">
+				<button id="clipping-btn">开启剖切</button>
+				<button id="toggle-plane-btn" style="display: none">隐藏剖切面</button>
+				<div id="clipping-transform-controls" style="display: none">
+					<button id="clipping-translate-btn">平移剖切面</button>
+					<button id="clipping-rotate-btn">旋转剖切面</button>
+				</div>
+			</div>
+		</div>
+		<script type="importmap">
+			{
+				"imports": {
+					"three": "../../../build/three.module.js",
+					"three/addons/": "../../../examples/jsm/"
+				}
+			}
+		</script>
+
+		<script type="module">
+			import * as THREE from "three";
+			import { SceneManager } from "./SceneManager.js";
+			import { GltfLoader } from "./GltfLoader.js";
+
+			// 从url获取模型参数
+			const urlParams = new URLSearchParams(window.location.search);
+			const modelUrl = urlParams.get("url");
+
+			if (!modelUrl) {
+				throw new Error("url参数错误"); // 抛出一个通用错误
+			}
+
+			const container = document.getElementById("container");
+
+			// 初始化场景管理器
+			const sceneManager = new SceneManager(container);
+
+			// 创建模型加载器
+			const gltfLoader = new GltfLoader(
+				sceneManager.getScene(),
+				sceneManager.getCamera(),
+				sceneManager.getControls()
+			);
+
+			// 加载模型
+			// let modelUrlTest = "./data/LittlestTokyo.glb";
+			// let modelUrl1 = "./data/faultage_4.glb";
+			// let modelUrl2 = "./data/15_4.glb";
+			// let modelUrl3 = "./data/3_4.glb";
+
+			gltfLoader.loadModel(modelUrl, {
+				onProgress: (path, progress) => {
+					console.log(`Loading ${path}: ${progress * 100}%`);
+				},
+				onComplete: (model) => {
+					model.name = "Model1"; // 添加名称以便识别
+					console.log("Model 1 loaded successfully");
+					sceneManager.recordInitialState(model);
+					// sceneManager.setControlLimits({
+					// 	minDistance: 2,
+					// 	maxDistance: 20,
+					// 	minPolarAngle: 0,
+					// 	maxPolarAngle: Math.PI / 2,
+					// });
+					// sceneManager.setTransformControlsModel(model);
+				},
+				onError: (path, error) => {
+					console.error(`Failed to load ${path}:`, error);
+				},
+			});
+
+			// 添加控制器快捷键
+			document.addEventListener("keydown", (event) => {
+				switch (event.key) {
+					case "r":
+						sceneManager.toggleRotate(!sceneManager.controls.enableRotate);
+						break;
+					case "z":
+						sceneManager.toggleZoom(!sceneManager.controls.enableZoom);
+						break;
+					case "p":
+						sceneManager.togglePan(!sceneManager.controls.enablePan);
+						break;
+				}
+			});
+
+			// 添加分散控制按钮的事件监听
+			document.getElementById("spread-x-btn").addEventListener("click", () => {
+				const buttonText = sceneManager.getSpreadState()
+					? "X轴分散"
+					: "恢复位置";
+				document.getElementById("spread-x-btn").textContent = buttonText;
+				sceneManager.spreadModels("x");
+			});
+
+			document.getElementById("spread-y-btn").addEventListener("click", () => {
+				const buttonText = sceneManager.getSpreadState()
+					? "Y轴分散"
+					: "恢复位置";
+				document.getElementById("spread-y-btn").textContent = buttonText;
+				sceneManager.spreadModels("y");
+			});
+
+			document.getElementById("spread-z-btn").addEventListener("click", () => {
+				const buttonText = sceneManager.getSpreadState()
+					? "Z轴分散"
+					: "恢复位置";
+				document.getElementById("spread-z-btn").textContent = buttonText;
+				sceneManager.spreadModels("z");
+			});
+
+			// 选择模型相关的事件监听
+			const selectBtn = document.getElementById("select-btn");
+			const transformControls = document.getElementById("transform-controls");
+
+			selectBtn.addEventListener("click", () => {
+				const isSelectMode = !sceneManager.isSelectMode;
+				sceneManager.toggleSelectMode(isSelectMode);
+				selectBtn.textContent = isSelectMode ? "退出选择" : "选择模型";
+				transformControls.style.display = isSelectMode ? "block" : "none";
+			});
+
+			// 变换控制按钮
+			document.getElementById("translate-btn").addEventListener("click", () => {
+				sceneManager.setTransformMode("translate");
+			});
+
+			document.getElementById("rotate-btn").addEventListener("click", () => {
+				sceneManager.setTransformMode("rotate");
+			});
+
+			document.getElementById("scale-btn").addEventListener("click", () => {
+				sceneManager.setTransformMode("scale");
+			});
+
+			// 添加剖切控制按钮的事件监听
+			const clippingBtn = document.getElementById("clipping-btn");
+			const togglePlaneBtn = document.getElementById("toggle-plane-btn");
+			const clippingTransformControls = document.getElementById(
+				"clipping-transform-controls"
+			);
+
+			clippingBtn.addEventListener("click", () => {
+				const buttonText = sceneManager.getClippingState()
+					? "开启剖切"
+					: "关闭剖切";
+				clippingBtn.textContent = buttonText;
+				sceneManager.toggleClipping();
+
+				// 控制按钮的可见性
+				togglePlaneBtn.style.display = sceneManager.getClippingState()
+					? "inline-block"
+					: "none";
+				clippingTransformControls.style.display =
+					sceneManager.getClippingState() ? "block" : "none";
+				togglePlaneBtn.textContent = "隐藏剖切面";
+			});
+
+			// 添加剖切面变换控制按钮的事件监听
+			document
+				.getElementById("clipping-translate-btn")
+				.addEventListener("click", () => {
+					sceneManager.setClippingMode("translate");
+				});
+
+			document
+				.getElementById("clipping-rotate-btn")
+				.addEventListener("click", () => {
+					sceneManager.setClippingMode("rotate");
+				});
+
+			// 添加显示/隐藏剖切面按钮的事件监听
+			togglePlaneBtn.addEventListener("click", () => {
+				sceneManager.togglePlaneVisibility();
+				togglePlaneBtn.textContent = sceneManager.getPlaneVisibility()
+					? "隐藏剖切面"
+					: "显示剖切面";
+			});
+
+			// 添加恢复原样按钮的事件监听
+			document.getElementById("reset-all-btn").addEventListener("click", () => {
+				sceneManager.resetAllModels();
+			});
+		</script>
+	</body>
+</html>

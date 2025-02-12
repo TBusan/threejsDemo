@@ -1,0 +1,250 @@
+<!DOCTYPE html>
+<html lang="en">
+	<head>
+		<title>three.js 加载3dtiles</title>
+		<meta charset="utf-8" />
+		<meta
+			name="viewport"
+			content="width=device-width, user-scalable=no, minimum-scale=1.0, maximum-scale=1.0"
+		/>
+		<!-- <link type="text/css" rel="stylesheet" href="main.css" /> -->
+		<style>
+			body {
+				margin: 0;
+				background-color: #bfe3dd;
+				color: #000;
+			}
+
+			a {
+				color: #2983ff;
+			}
+
+			#container {
+				width: 100vw;
+				height: 100vh;
+			}
+		</style>
+	</head>
+
+	<body>
+		<div id="container"></div>
+
+		<script type="importmap">
+			{
+				"imports": {
+					"three": "../../build/three.module.js",
+					"three/addons/": "../../examples/jsm/",
+					"3DTilesRendererJS": "https://cdn.jsdelivr.net/npm/3d-tiles-renderer@0.3.30/+esm"
+				}
+			}
+		</script>
+
+		<script type="module">
+			import * as THREE from "three";
+
+			import Stats from "three/addons/libs/stats.module.js";
+			import { OrbitControls } from "three/addons/controls/OrbitControls.js";
+			import { RoomEnvironment } from "three/addons/environments/RoomEnvironment.js";
+
+			import { TilesRenderer, GoogleTilesRenderer } from "3DTilesRendererJS";
+
+			import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
+			import { DRACOLoader } from "three/addons/loaders/DRACOLoader.js";
+
+			import * as MW from "../../workmeshdist/meshwalk.module.js";
+
+			let scene, camera, renderer, clock;
+			let tilesRenderer, world, playerObjectHolder;
+			let playerController, animationController, tpsCameraControls;
+			let octree;
+
+			init();
+			animate();
+
+			function init() {
+				// 初始化场景
+				scene = new THREE.Scene();
+				clock = new THREE.Clock();
+
+				// 初始化相机
+				camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 100000);
+				camera.position.set(0, 2, 5);
+
+				// 初始化渲染器
+				const container = document.getElementById("container");
+				renderer = new THREE.WebGLRenderer({ antialias: true });
+				renderer.setPixelRatio(window.devicePixelRatio);
+				renderer.setSize(window.innerWidth, window.innerHeight);
+				container.appendChild(renderer.domElement);
+
+				// 初始化3DTiles
+				setupTiles();
+
+				// 初始化物理世界
+				world = new MW.World();
+				octree = new MW.Octree();
+
+				// 加载角色模型
+				loadCharacter();
+
+				// 添加环境光
+				const ambientLight = new THREE.AmbientLight(0xffffff, 0.5);
+				scene.add(ambientLight);
+
+				// 添加平行光
+				const directionalLight = new THREE.DirectionalLight(0xffffff, 0.5);
+				directionalLight.position.set(0, 10, 0);
+				scene.add(directionalLight);
+
+				// 监听窗口大小变化
+				window.addEventListener('resize', onWindowResize, false);
+			}
+
+			function setupTiles() {
+				tilesRenderer = new GoogleTilesRenderer("AIzaSyC9oWR4UAwTOaGaWqsDbpfpGA8s0qbi8s8");
+				tilesRenderer.setLatLonToYUp(35.6586 * THREE.MathUtils.DEG2RAD, 139.7454 * THREE.MathUtils.DEG2RAD);
+				tilesRenderer.setCamera(camera);
+				tilesRenderer.setResolutionFromRenderer(camera, renderer);
+
+				const dracoLoader = new DRACOLoader();
+				dracoLoader.setDecoderPath("../../examples/jsm/libs/draco/gltf/");
+
+				const loader = new GLTFLoader(tilesRenderer.manager);
+				loader.setDRACOLoader(dracoLoader);
+
+				tilesRenderer.manager.addHandler(/\.gltf$/, loader);
+				scene.add(tilesRenderer.group);
+
+				// 监听tiles加载完成事件
+				tilesRenderer.addEventListener('load', (event) => {
+					const content = event.content;
+					if (content && content.scene) {
+						content.scene.traverse((node) => {
+							if (node.isMesh) {
+								// 为每个mesh创建碰撞体
+								octree.importThreeMesh(node);
+							}
+						});
+					}
+				});
+			}
+
+			function loadCharacter() {
+				const loader = new GLTFLoader();
+				// 使用包含动画的模型
+				loader.load('../../examples/models/gltf/RobotExpressive/RobotExpressive.glb', (gltf) => {
+					const model = gltf.scene;
+					model.scale.setScalar(0.5); // 调整模型大小
+
+					// 创建角色容器
+					playerObjectHolder = new THREE.Object3D();
+					playerObjectHolder.add(model);
+					scene.add(playerObjectHolder);
+
+					// // 设置动画
+					// const animations = gltf.animations;
+					// if (animations && animations.length > 0) {
+					// 	animationController = new MW.AnimationController({
+					// 		object: model,
+					// 		animations: animations
+					// 	});
+
+					// 	// 设置默认动画状态映射
+					// 	const states = {
+					// 		'Idle': 'Idle',
+					// 		'Run': 'Running'
+					// 	};
+
+					// 	// 确保动画名称匹配
+					// 	animations.forEach(clip => {
+					// 		console.log('Available animation:', clip.name);
+					// 	});
+
+					// 	// 播放默认动画
+					// 	animationController.play('Idle');
+					// }
+
+					// 设置角色控制器
+					const playerRadius = 0.3;
+					playerController = new MW.CharacterController(
+						playerObjectHolder,
+						playerRadius,
+						{
+							gravity: -9.8,
+							jumpSpeed: 5,
+							movementSpeed: 5,
+							collisionPadding: 0.1
+						}
+					);
+
+					// 设置第三人称相机控制器
+					tpsCameraControls = new MW.TPSCameraControls(
+						camera,
+						playerObjectHolder,
+						{
+							minDistance: 2,
+							maxDistance: 10,
+							rotationSpeed: 0.01,
+							followSpeed: 5
+						}
+					);
+
+					// 设置键盘控制
+					const keyInputControl = new MW.KeyInputControl();
+					keyInputControl.addEventListener('movekeyon', (event) => {
+						const action = event.action;
+						playerController.moveAction(action);
+						if (animationController) {
+							animationController.play('Running');
+						}
+					});
+
+					keyInputControl.addEventListener('movekeyoff', () => {
+						playerController.stopMoving();
+						if (animationController) {
+							animationController.play('Idle');
+						}
+					});
+
+					// 设置初始位置（调高一点以确保不会穿过地面）
+					playerObjectHolder.position.set(0, 100, 0);
+				}, 
+				// 添加加载进度回调
+				(xhr) => {
+					console.log((xhr.loaded / xhr.total * 100) + '% loaded');
+				},
+				// 添加错误处理
+				(error) => {
+					console.error('An error happened:', error);
+				});
+			}
+
+			function onWindowResize() {
+				camera.aspect = window.innerWidth / window.innerHeight;
+				camera.updateProjectionMatrix();
+				renderer.setSize(window.innerWidth, window.innerHeight);
+			}
+
+			function animate() {
+				requestAnimationFrame(animate);
+				const delta = clock.getDelta();
+
+				if (playerController) {
+					world.fixedUpdate(); // 更新物理
+					playerController.update(delta); // 更新角色控制器
+				}
+
+				if (tpsCameraControls) {
+					tpsCameraControls.update(delta); // 更新相机
+				}
+
+				if (animationController) {
+					animationController.update(delta); // 更新动画
+				}
+
+				tilesRenderer.update(); // 更新tiles
+				renderer.render(scene, camera);
+			}
+		</script>
+	</body>
+</html>

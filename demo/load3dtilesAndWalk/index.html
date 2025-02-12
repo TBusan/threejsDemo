@@ -1,0 +1,247 @@
+<!DOCTYPE html>
+<html lang="en">
+	<head>
+		<title>three.js 加载3dtiles</title>
+		<meta charset="utf-8" />
+		<meta
+			name="viewport"
+			content="width=device-width, user-scalable=no, minimum-scale=1.0, maximum-scale=1.0"
+		/>
+		<!-- <link type="text/css" rel="stylesheet" href="main.css" /> -->
+		<style>
+			body {
+				background-color: #bfe3dd;
+				color: #000;
+			}
+
+			a {
+				color: #2983ff;
+			}
+
+			#container {
+				width: 1000px;
+				height: 1000px;
+			}
+		</style>
+	</head>
+
+	<body>
+		<div id="container"></div>
+
+		<script type="importmap">
+			{
+				"imports": {
+					"three": "../../build/three.module.js",
+					"three/addons/": "../../examples/jsm/",
+					"3DTilesRendererJS": "https://cdn.jsdelivr.net/npm/3d-tiles-renderer@0.3.30/+esm"
+				}
+			}
+		</script>
+
+		<script type="module">
+			import * as THREE from "three";
+
+			import Stats from "three/addons/libs/stats.module.js";
+			import { OrbitControls } from "three/addons/controls/OrbitControls.js";
+			import { RoomEnvironment } from "three/addons/environments/RoomEnvironment.js";
+
+			import { TilesRenderer, GoogleTilesRenderer } from "3DTilesRendererJS";
+
+			import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
+			import { DRACOLoader } from "three/addons/loaders/DRACOLoader.js";
+
+			import * as MW from "../../workmeshdist/meshwalk.module.js";
+
+			const world = new MW.World();
+			const octree = new MW.Octree();
+			world.add(octree);
+
+
+			const scene = new THREE.Scene();
+
+            const clock = new THREE.Clock();
+
+			const container = document.getElementById("container");
+			const camera = new THREE.PerspectiveCamera(
+				75,
+				window.innerWidth / window.innerHeight,
+				0.1,
+				100000
+			);
+			camera.position.y = 500;
+			camera.position.z = 500;
+
+			// const renderer = new THREE.WebGLRenderer({
+			// 	canvas: canvas,
+			// });
+
+			const renderer = new THREE.WebGLRenderer({ antialias: true });
+			renderer.setPixelRatio(window.devicePixelRatio);
+			renderer.setSize(window.innerWidth, window.innerHeight);
+			renderer.setSize(window.innerWidth, window.innerHeight, false);
+			container.appendChild(renderer.domElement);
+
+			// const controls = new OrbitControls(camera, renderer.domElement);
+
+			const playerObjectHolder = new THREE.Object3D();
+			scene.add(playerObjectHolder);
+
+			const playerRadius = 0.75;
+			const sphere = new THREE.Mesh(
+				new THREE.SphereGeometry(playerRadius, 8, 8),
+				new THREE.MeshBasicMaterial({ color: 0xff0000, wireframe: true })
+			);
+			sphere.position.y = playerRadius;
+			playerObjectHolder.add(sphere);
+
+			const playerController = new MW.CharacterController(
+				playerObjectHolder,
+				playerRadius
+			);
+			playerController.teleport(0, 10, 0);
+            // playerController.teleport(20246.934953994347, 
+            // -6370877.772522856, 0);
+			world.add(playerController);
+
+			const tpsCameraControls = new MW.TPSCameraControls(
+				camera, // three.js camera
+				playerObjectHolder, // tracking object
+				world,
+				renderer.domElement
+			);
+
+			// bind events
+			const keyInputControl = new MW.KeyInputControl();
+			keyInputControl.addEventListener(
+				"movekeyon",
+				() => (playerController.isRunning = true)
+			);
+			keyInputControl.addEventListener(
+				"movekeyoff",
+				() => (playerController.isRunning = false)
+			);
+			keyInputControl.addEventListener("jumpkeypress", () =>
+				playerController.jump()
+			);
+
+			// synk with keybord input and camera control input
+			keyInputControl.addEventListener("movekeychange", () => {
+				var cameraFrontAngle = tpsCameraControls.frontAngle;
+				var characterFrontAngle = keyInputControl.frontAngle;
+				playerController.direction = cameraFrontAngle + characterFrontAngle;
+			});
+
+			// 'updated' event is fired by `tpsCameraControls.update()`
+			tpsCameraControls.addEventListener("update", () => {
+				if (!playerController.isRunning) return;
+
+				const cameraFrontAngle = tpsCameraControls.frontAngle;
+				const characterFrontAngle = keyInputControl.frontAngle;
+				playerController.direction = cameraFrontAngle + characterFrontAngle;
+			});
+
+			const [characterGltf] = await Promise.all([
+				new GLTFLoader().loadAsync("miku.glb"),
+			]);
+
+			const tilesRenderer = new GoogleTilesRenderer(
+				"AIzaSyC9oWR4UAwTOaGaWqsDbpfpGA8s0qbi8s8"
+			);
+
+
+			// 添加tiles加载完成的事件监听
+			// tilesRenderer.addEventListener('load-model', (event) => {
+			// 	const content = event;
+			// 	console.log('load-model--111')
+			// 	if (content && content.scene) {
+			// 		// 遍历加载的模型
+			// 		content.scene.traverse((node) => {
+			// 			if (node.isMesh) {
+			// 				// 为每个mesh创建碰撞体
+			// 				const geometry = node.geometry;
+			// 				if (geometry) {
+			// 					// 将mesh添加到octree中进行碰撞检测
+			// 					octree.addGraphNode(node);
+			// 					// 强制更新octree
+			// 					// octree.updateMatrixWorld(true);
+			// 				}
+			// 			}
+			// 		});
+			// 	}
+			// });
+
+			// 修改tilesRenderer的设置
+			tilesRenderer.setLatLonToYUp(
+				35.6586 * THREE.MathUtils.DEG2RAD,
+				139.7454 * THREE.MathUtils.DEG2RAD
+			);
+			// Tokyo Tower
+
+			tilesRenderer.setCamera(camera);
+			tilesRenderer.setResolutionFromRenderer(camera, renderer);
+
+			const dracoLoader = new DRACOLoader();
+			dracoLoader.setDecoderPath("../../examples/jsm/libs/draco/gltf/");
+			// dracoLoader.setDecoderPath(
+			// 	"https://unpkg.com/three@0.153.0/examples/jsm/libs/draco/gltf/"
+			// );
+
+			const loader = new GLTFLoader(tilesRenderer.manager);
+			loader.setDRACOLoader(dracoLoader);
+
+			tilesRenderer.manager.addHandler(/\.gltf$/, loader);
+            debugger
+			scene.add(tilesRenderer.group);
+			octree.addGraphNode(tilesRenderer.group);
+
+			playerObjectHolder.add(characterGltf.scene);
+
+			const animationController = new MW.AnimationController(
+				characterGltf.scene,
+				characterGltf.animations
+			);
+			animationController.motion.jump.setLoop(THREE.LoopOnce, 0);
+			animationController.motion.slide.setLoop(THREE.LoopOnce, 0);
+			animationController.motion.jump.clampWhenFinished = true;
+			animationController.motion.slide.clampWhenFinished = true;
+
+			// player motion
+			playerController.addEventListener("startIdling", () =>
+				animationController.play("idle")
+			);
+			playerController.addEventListener("startWalking", () =>
+				animationController.play("run")
+			);
+			playerController.addEventListener("startJumping", () =>
+				animationController.play("jump")
+			);
+			playerController.addEventListener("startSliding", () =>
+				animationController.play("slide")
+			);
+			playerController.addEventListener("startFalling", () =>
+				animationController.play("slide")
+			);
+			animationController.play("slide");
+
+			function animate() {
+                const delta = clock.getDelta();
+				requestAnimationFrame(animate);
+				// 更新世界物理
+				world.fixedUpdate();
+				// 更新相机控制器
+				tpsCameraControls.update(delta);
+				// 更新动画
+				animationController.update(delta);
+				// 更新tiles
+				tilesRenderer.update();
+				// 渲染场景
+				renderer.render(scene, camera);
+			}
+			animate();
+
+			// // 添加调试辅助（可选）
+			// const octreeHelper = new THREE.Box3Helper(octree.box, 0xff0000);
+			// scene.add(octreeHelper);
+		</script>
+	</body>
+</html>

@@ -1,0 +1,105 @@
+<!DOCTYPE html>
+<html lang="en">
+	<head>
+		<title>three.js 加载3dtiles</title>
+		<meta charset="utf-8" />
+		<meta
+			name="viewport"
+			content="width=device-width, user-scalable=no, minimum-scale=1.0, maximum-scale=1.0"
+		/>
+		<!-- <link type="text/css" rel="stylesheet" href="main.css" /> -->
+		<style>
+			body {
+				background-color: #bfe3dd;
+				color: #000;
+			}
+
+			a {
+				color: #2983ff;
+			}
+
+			#container {
+				width: 1000px;
+				height: 1000px;
+			}
+		</style>
+	</head>
+
+	<body>
+		<div id="container"></div>
+
+		<script type="importmap">
+			{
+				"imports": {
+					"three": "../../build/three.module.js",
+					"three/addons/": "../../examples/jsm/",
+					"3DTilesRendererJS": "https://cdn.jsdelivr.net/npm/3d-tiles-renderer@0.3.30/+esm"
+				}
+			}
+		</script>
+
+		<script type="module">
+			import * as THREE from "three";
+
+			import Stats from "three/addons/libs/stats.module.js";
+			import { OrbitControls } from "three/addons/controls/OrbitControls.js";
+			import { RoomEnvironment } from "three/addons/environments/RoomEnvironment.js";
+
+			import { TilesRenderer, GoogleTilesRenderer } from "3DTilesRendererJS";
+			import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
+			import { DRACOLoader } from "three/addons/loaders/DRACOLoader.js";
+
+			const scene = new THREE.Scene();
+
+			const container = document.getElementById("container");
+			const camera = new THREE.PerspectiveCamera(
+				75,
+				window.innerWidth / window.innerHeight,
+				0.1,
+				100000
+			);
+			camera.position.y = 500;
+			camera.position.z = 500;
+
+			const renderer = new THREE.WebGLRenderer({ antialias: true });
+			renderer.setPixelRatio(window.devicePixelRatio);
+			renderer.setSize(window.innerWidth, window.innerHeight);
+			renderer.setSize(window.innerWidth, window.innerHeight, false);
+			container.appendChild(renderer.domElement);
+            const controls = new OrbitControls( camera, renderer.domElement );
+			const tilesRenderer = new GoogleTilesRenderer(
+				"AIzaSyC9oWR4UAwTOaGaWqsDbpfpGA8s0qbi8s8"
+			);
+
+			// 修改tilesRenderer的设置
+			tilesRenderer.setLatLonToYUp(
+				35.6586 * THREE.MathUtils.DEG2RAD,
+				139.7454 * THREE.MathUtils.DEG2RAD
+			);
+
+			// Tokyo Tower
+			tilesRenderer.setCamera(camera);
+			tilesRenderer.setResolutionFromRenderer(camera, renderer);
+
+			const dracoLoader = new DRACOLoader();
+			dracoLoader.setDecoderPath("../../examples/jsm/libs/draco/gltf/");
+            
+			const loader = new GLTFLoader(tilesRenderer.manager);
+			loader.setDRACOLoader(dracoLoader);
+
+			tilesRenderer.manager.addHandler(/\.gltf$/, loader);
+			scene.add(tilesRenderer.group);
+
+			function animate() {
+				requestAnimationFrame(animate);
+				// 更新tiles
+				tilesRenderer.update();
+				// 渲染场景
+				renderer.render(scene, camera);
+			}
+			animate();
+
+	
+		</script>
+	</body>
+</html>
