@@ -1,34 +1,33 @@
 <!DOCTYPE html>
 <html lang="en">
-	<head>
-		<title>three.js 加载3dtiles</title>
-		<meta charset="utf-8" />
-		<meta
-			name="viewport"
-			content="width=device-width, user-scalable=no, minimum-scale=1.0, maximum-scale=1.0"
-		/>
-		<!-- <link type="text/css" rel="stylesheet" href="main.css" /> -->
-		<style>
-			body {
-				background-color: #bfe3dd;
-				color: #000;
-			}
 
-			a {
-				color: #2983ff;
-			}
+<head>
+	<title>3DTiles with GLTF Character</title>
+	<meta charset="utf-8" />
+	<meta name="viewport" content="width=device-width, user-scalable=no, minimum-scale=1.0, maximum-scale=1.0" />
+	<!-- <link type="text/css" rel="stylesheet" href="main.css" /> -->
+	<style>
+		body {
+			background-color: #bfe3dd;
+			color: #000;
+			margin: 0;
+		}
 
-			#container {
-				width: 1000px;
-				height: 1000px;
-			}
-		</style>
-	</head>
+		a {
+			color: #2983ff;
+		}
 
-	<body>
-		<div id="container"></div>
+		#container {
+			width: 100vw;
+			height: 100vh;
+		}
+	</style>
+</head>
 
-		<script type="importmap">
+<body>
+	<div id="container"></div>
+
+	<script type="importmap">
 			{
 				"imports": {
 					"three": "../../build/three.module.js",
@@ -38,68 +37,178 @@
 			}
 		</script>
 
-		<script type="module">
-			import * as THREE from "three";
+	<script type="module">
+		import * as THREE from "three";
 
-			import Stats from "three/addons/libs/stats.module.js";
-			import { OrbitControls } from "three/addons/controls/OrbitControls.js";
-			import { RoomEnvironment } from "three/addons/environments/RoomEnvironment.js";
+		import Stats from "three/addons/libs/stats.module.js";
+		import { OrbitControls } from "three/addons/controls/OrbitControls.js";
+		import { RoomEnvironment } from "three/addons/environments/RoomEnvironment.js";
 
-			import { TilesRenderer, GoogleTilesRenderer } from "3DTilesRendererJS";
-			import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
-			import { DRACOLoader } from "three/addons/loaders/DRACOLoader.js";
+		import { TilesRenderer, GoogleTilesRenderer } from "3DTilesRendererJS";
+		import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
+		import { DRACOLoader } from "three/addons/loaders/DRACOLoader.js";
+		import { PointerLockControls } from "three/addons/controls/PointerLockControls.js";
 
-			const scene = new THREE.Scene();
+		let scene, camera, renderer, clock;
+		let tilesRenderer, controls, player;
+		let moveForward = false, moveBackward = false, moveLeft = false, moveRight = false;
+		let velocity = new THREE.Vector3();
+		let direction = new THREE.Vector3();
+		const gravity = -9.8;
+		let canJump = true;
 
-			const container = document.getElementById("container");
-			const camera = new THREE.PerspectiveCamera(
-				75,
-				window.innerWidth / window.innerHeight,
-				0.1,
-				100000
-			);
-			camera.position.y = 500;
-			camera.position.z = 500;
+		init();
+		animate();
 
-			const renderer = new THREE.WebGLRenderer({ antialias: true });
+		function init() {
+			// 初始化场景
+			scene = new THREE.Scene();
+			clock = new THREE.Clock();
+
+			// 初始化相机
+			camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+			camera.position.set(0, 10, 0);
+
+			// 初始化渲染器
+			renderer = new THREE.WebGLRenderer({ antialias: true });
 			renderer.setPixelRatio(window.devicePixelRatio);
 			renderer.setSize(window.innerWidth, window.innerHeight);
-			renderer.setSize(window.innerWidth, window.innerHeight, false);
-			container.appendChild(renderer.domElement);
-            const controls = new OrbitControls( camera, renderer.domElement );
-			const tilesRenderer = new GoogleTilesRenderer(
-				"AIzaSyC9oWR4UAwTOaGaWqsDbpfpGA8s0qbi8s8"
-			);
+			document.getElementById("container").appendChild(renderer.domElement);
 
-			// 修改tilesRenderer的设置
-			tilesRenderer.setLatLonToYUp(
-				35.6586 * THREE.MathUtils.DEG2RAD,
-				139.7454 * THREE.MathUtils.DEG2RAD
-			);
+			// 初始化3DTiles
+			setupTiles();
 
-			// Tokyo Tower
+			// 初始化灯光
+			const ambientLight = new THREE.AmbientLight(0xffffff, 0.5);
+			scene.add(ambientLight);
+
+			const directionalLight = new THREE.DirectionalLight(0xffffff, 0.5);
+			directionalLight.position.set(0, 10, 0);
+			scene.add(directionalLight);
+
+			// 加载角色模型
+			loadCharacter();
+
+			// 初始化指针锁定控制
+			controls = new PointerLockControls(camera, document.body);
+			scene.add(controls.getObject());
+
+			// 添加键盘事件监听
+			document.addEventListener('keydown', onKeyDown, false);
+			document.addEventListener('keyup', onKeyUp, false);
+			document.addEventListener('click', () => controls.lock(), false);
+
+			// 监听窗口大小变化
+			window.addEventListener('resize', onWindowResize, false);
+		}
+
+		function setupTiles() {
+			tilesRenderer = new GoogleTilesRenderer("AIzaSyC9oWR4UAwTOaGaWqsDbpfpGA8s0qbi8s8");
+			tilesRenderer.setLatLonToYUp(35.6586 * THREE.MathUtils.DEG2RAD, 139.7454 * THREE.MathUtils.DEG2RAD);
+
 			tilesRenderer.setCamera(camera);
 			tilesRenderer.setResolutionFromRenderer(camera, renderer);
 
 			const dracoLoader = new DRACOLoader();
 			dracoLoader.setDecoderPath("../../examples/jsm/libs/draco/gltf/");
-            
+
+			// dracoLoader.setDecoderPath(
+			// 	"https://unpkg.com/three@0.153.0/examples/jsm/libs/draco/gltf/"
+			// );
+
 			const loader = new GLTFLoader(tilesRenderer.manager);
 			loader.setDRACOLoader(dracoLoader);
 
 			tilesRenderer.manager.addHandler(/\.gltf$/, loader);
 			scene.add(tilesRenderer.group);
 
-			function animate() {
-				requestAnimationFrame(animate);
-				// 更新tiles
-				tilesRenderer.update();
-				// 渲染场景
-				renderer.render(scene, camera);
-			}
-			animate();
+		}
 
-	
-		</script>
-	</body>
+		function loadCharacter() {
+			const loader = new GLTFLoader();
+			loader.load('../../examples/models/gltf/RobotExpressive/RobotExpressive.glb', (gltf) => {
+				player = gltf.scene;
+				player.scale.set(0.5, 0.5, 0.5);
+				player.position.set(0, 10, 0);
+				scene.add(player);
+
+				// 设置角色碰撞体
+				const box = new THREE.Box3().setFromObject(player);
+				const size = new THREE.Vector3();
+				box.getSize(size);
+				player.userData.collider = new THREE.Box3(new THREE.Vector3(), size);
+			});
+		}
+
+		function onKeyDown(event) {
+			switch (event.code) {
+				case 'KeyW': moveForward = true; break;
+				case 'KeyA': moveLeft = true; break;
+				case 'KeyS': moveBackward = true; break;
+				case 'KeyD': moveRight = true; break;
+				case 'Space': if (canJump) velocity.y += 10; canJump = false; break;
+			}
+		}
+
+		function onKeyUp(event) {
+			switch (event.code) {
+				case 'KeyW': moveForward = false; break;
+				case 'KeyA': moveLeft = false; break;
+				case 'KeyS': moveBackward = false; break;
+				case 'KeyD': moveRight = false; break;
+			}
+		}
+
+		function onWindowResize() {
+			camera.aspect = window.innerWidth / window.innerHeight;
+			camera.updateProjectionMatrix();
+			renderer.setSize(window.innerWidth, window.innerHeight);
+		}
+
+		function animate() {
+			requestAnimationFrame(animate);
+
+			const delta = clock.getDelta();
+
+			// 更新角色移动
+			if (controls.isLocked) {
+				velocity.x -= velocity.x * 10.0 * delta;
+				velocity.z -= velocity.z * 10.0 * delta;
+
+				direction.z = Number(moveForward) - Number(moveBackward);
+				direction.x = Number(moveRight) - Number(moveLeft);
+				direction.normalize();
+
+				if (moveForward || moveBackward) velocity.z -= direction.z * 400.0 * delta;
+				if (moveLeft || moveRight) velocity.x -= direction.x * 400.0 * delta;
+
+				velocity.y += gravity * delta;
+
+				controls.moveRight(-velocity.x * delta);
+				controls.moveForward(-velocity.z * delta);
+				controls.getObject().position.y += velocity.y * delta;
+
+				// 碰撞检测
+				if (player && player.userData.collider) {
+					const collider = player.userData.collider;
+					const position = controls.getObject().position;
+
+					// 简单的地面碰撞检测
+					if (position.y < 0) {
+						position.y = 0;
+						velocity.y = 0;
+						canJump = true;
+					}
+				}
+			}
+
+			// 更新3DTiles
+			tilesRenderer.update();
+
+			// 渲染场景
+			renderer.render(scene, camera);
+		}
+	</script>
+</body>
+
 </html>
