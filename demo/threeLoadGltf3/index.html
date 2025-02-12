@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="en">
 	<head>
-		<title>three.js webgl - animation - keyframes</title>
+		<title>模型预览平台</title>
 		<meta charset="utf-8" />
 		<meta
 			name="viewport"
@@ -73,11 +73,21 @@
 			#reset-all-btn:hover {
 				background: #d32f2f;
 			}
+			.css-mask{
+				position: fixed;
+				top: 0;
+				left: 0;
+				width: 100%;
+				height: 100%;
+				background: rgba(0, 0, 0, 0.5);
+				z-index: 999;
+			}
 		</style>
 	</head>
 
 	<body>
 		<div id="container"></div>
+		<div class="css-mask"></div>
 		<div
 			id="control-panel"
 			style="

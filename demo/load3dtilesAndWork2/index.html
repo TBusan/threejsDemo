@@ -67,7 +67,8 @@
 
 			// 初始化相机
 			camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
-			camera.position.set(0, 10, 0);
+			camera.position.set(0, 100, 10);
+			camera.lookAt(0, 0, 0);
 
 			// 初始化渲染器
 			renderer = new THREE.WebGLRenderer({ antialias: true });
@@ -87,16 +88,16 @@
 			scene.add(directionalLight);
 
 			// 加载角色模型
-			loadCharacter();
+			// loadCharacter();
 
 			// 初始化指针锁定控制
 			controls = new PointerLockControls(camera, document.body);
 			scene.add(controls.getObject());
 
 			// 添加键盘事件监听
-			document.addEventListener('keydown', onKeyDown, false);
-			document.addEventListener('keyup', onKeyUp, false);
-			document.addEventListener('click', () => controls.lock(), false);
+			// document.addEventListener('keydown', onKeyDown, false);
+			// document.addEventListener('keyup', onKeyUp, false);
+			// document.addEventListener('click', () => controls.lock(), false);
 
 			// 监听窗口大小变化
 			window.addEventListener('resize', onWindowResize, false);
@@ -129,7 +130,7 @@
 			loader.load('../../examples/models/gltf/RobotExpressive/RobotExpressive.glb', (gltf) => {
 				player = gltf.scene;
 				player.scale.set(0.5, 0.5, 0.5);
-				player.position.set(0, 10, 0);
+				player.position.set(0, 100, 0); // 初始位置设置为高处，模拟从天上掉落
 				scene.add(player);
 
 				// 设置角色碰撞体
@@ -137,7 +138,35 @@
 				const size = new THREE.Vector3();
 				box.getSize(size);
 				player.userData.collider = new THREE.Box3(new THREE.Vector3(), size);
+
+				// 开始掉落动画
+				startFallingAnimation();
 			});
+		}
+
+		function startFallingAnimation() {
+			const raycaster = new THREE.Raycaster();
+			let fallSpeed = 0.5; // 掉落速度
+			const gravity = 9.8; // 重力加速度
+
+			const fall = () => {
+				// 从模型底部向下发射射线
+				raycaster.set(player.position, new THREE.Vector3(0, -1, 0));
+				const intersects = raycaster.intersectObjects(scene.children, true);
+
+				if (intersects.length > 0 && intersects[0].distance > 0) {
+					// 如果射线与地面相交，停止掉落
+					player.position.y = intersects[0].point.y;
+					console.log('Model has landed on the ground');
+				} else {
+					// 继续掉落
+					player.position.y -= fallSpeed;
+					fallSpeed += gravity * 0.016; // 模拟重力加速度，0.016是每帧的时间（假设60fps）
+					requestAnimationFrame(fall);
+				}
+			};
+
+			fall();
 		}
 
 		function onKeyDown(event) {
@@ -172,6 +201,7 @@
 
 			// 更新角色移动
 			if (controls.isLocked) {
+				console.log('---角色移动---');
 				velocity.x -= velocity.x * 10.0 * delta;
 				velocity.z -= velocity.z * 10.0 * delta;
 
