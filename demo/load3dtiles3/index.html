@@ -1,13 +1,12 @@
 <!DOCTYPE html>
 <html lang="en">
 	<head>
-		<title>three.js 加载3dtiles</title>
+		<title>three.js 加载3dtiles(本地的离线3dtiles)</title>
 		<meta charset="utf-8" />
 		<meta
 			name="viewport"
 			content="width=device-width, user-scalable=no, minimum-scale=1.0, maximum-scale=1.0"
 		/>
-		<!-- <link type="text/css" rel="stylesheet" href="main.css" /> -->
 		<style>
 			body {
 				background-color: #bfe3dd;
@@ -19,8 +18,6 @@
 	</head>
 
 	<body>
-		<!-- <div id="container"></div> -->
-
 		<script type="importmap">
 			{
 				"imports": {
@@ -83,9 +80,7 @@
 			});
 
 			const tilesetUrl = "http://localhost:8081/tileset.json"; // 替换为你的 tileset.json 文件路径
-
 			const tileset = new TilesRenderer(tilesetUrl);
-
 			const controls = new OrbitControls(camera, renderer.domElement);
 
 			function onLoadModel({ scene }) {
