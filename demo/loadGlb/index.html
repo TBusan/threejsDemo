@@ -1,0 +1,312 @@
+<!DOCTYPE html>
+<html lang="en">
+	<head>
+		<title>three.js webgl - animation - keyframes</title>
+		<meta charset="utf-8" />
+		<meta
+			name="viewport"
+			content="width=device-width, user-scalable=no, minimum-scale=1.0, maximum-scale=1.0"
+		/>
+		<!-- <link type="text/css" rel="stylesheet" href="main.css" /> -->
+		<style>
+			body {
+				background-color: #bfe3dd;
+				color: #000;
+			}
+
+			a {
+				color: #2983ff;
+			}
+		</style>
+	</head>
+
+	<body>
+		<div id="container"></div>
+
+		<div id="info">
+			<a href="https://threejs.org" target="_blank" rel="noopener">three.js</a>
+			webgl - animation - keyframes<br />
+			Model:
+			<a
+				href="https://artstation.com/artwork/1AGwX"
+				target="_blank"
+				rel="noopener"
+				>Littlest Tokyo</a
+			>
+			by
+			<a href="https://artstation.com/glenatron" target="_blank" rel="noopener"
+				>Glen Fox</a
+			>, CC Attribution.
+		</div>
+
+		<script type="importmap">
+			{
+				"imports": {
+					"three": "../../../build/three.module.js",
+					"three/addons/": "../../../examples/jsm/"
+				}
+			}
+		</script>
+
+		<script type="module">
+			import * as THREE from "three";
+
+			import Stats from "three/addons/libs/stats.module.js";
+
+			import { OrbitControls } from "three/addons/controls/OrbitControls.js";
+			import { RoomEnvironment } from "three/addons/environments/RoomEnvironment.js";
+
+			import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
+			import { DRACOLoader } from "three/addons/loaders/DRACOLoader.js";
+
+			let mixer;
+
+			const clock = new THREE.Clock();
+			const container = document.getElementById("container");
+
+			const stats = new Stats();
+			container.appendChild(stats.dom);
+
+			const renderer = new THREE.WebGLRenderer({ antialias: true });
+			renderer.setPixelRatio(window.devicePixelRatio);
+			renderer.setSize(window.innerWidth, window.innerHeight);
+			container.appendChild(renderer.domElement);
+
+			const pmremGenerator = new THREE.PMREMGenerator(renderer);
+
+			const scene = new THREE.Scene();
+			scene.background = new THREE.Color(0xbfe3dd);
+			scene.environment = pmremGenerator.fromScene(
+				new RoomEnvironment(),
+				0.04
+			).texture;
+
+			const camera = new THREE.PerspectiveCamera(
+				40,
+				window.innerWidth / window.innerHeight,
+				1,
+				100
+			);
+			camera.position.set(5, 2, 8);
+
+			const controls = new OrbitControls(camera, renderer.domElement);
+			controls.target.set(0, 0.5, 0);
+			controls.update();
+			controls.enablePan = false;
+			controls.enableDamping = true;
+
+			const dracoLoader = new DRACOLoader();
+			dracoLoader.setDecoderPath("../../examples/jsm/libs/draco/gltf/");
+
+			const loader = new GLTFLoader();
+			loader.setDRACOLoader(dracoLoader);
+
+			const bufferLoader = new THREE.FileLoader();
+			// bufferLoader.setPath("./");
+			debugger;
+			bufferLoader.setResponseType("arraybuffer");
+
+			const decoder$1 = new TextDecoder();
+			const TYPED_ARRAYS = [
+				"Int8Array",
+				"Uint8Array",
+				"Uint8ClampedArray",
+				"Int16Array",
+				"Uint16Array",
+				"Int32Array",
+				"Uint32Array",
+				"Float32Array",
+				"Float64Array",
+			];
+
+			class CustomDRACOLoader extends DRACOLoader {
+				constructor(e) {
+					super(e),
+						this.setDecoderPath("../../examples/jsm/libs/draco/gltf/"),
+						this.preload();
+				}
+				loadAsync(e) {
+					return bufferLoader
+						.loadAsync(e)
+						.then(async (i) => {
+							const r = parseInt(decoder$1.decode(i.slice(0, 10)));
+							const a = JSON.parse(decoder$1.decode(i.slice(10, 10 + r)));
+							const o = i.slice(10 + r);
+							const l = {};
+							const c = {};
+							a.attributes.forEach((u, h) => {
+								const f = u[0];
+								(l[f] = h), (c[f] = TYPED_ARRAYS[u[1]]);
+							});
+							const d = await this.decodeGeometry(o, {
+								attributeIDs: l,
+								attributeTypes: c,
+								useUniqueIDs: !0,
+							});
+							return a.userData && (d.userData = a.userData), d;
+						})
+						.catch((i) => {
+							throw new Error(`${e} could not be loaded.`);
+						});
+				}
+			}
+
+			const geometryLoader = {
+				_geometryCache: new Map(),
+				_initLoad(s, e) {
+					return (
+						this._geometryCache.has(s) ||
+							this._geometryCache.set(s, new Promise(e)),
+						this._geometryCache.get(s)
+					);
+				},
+				load(s, e = "default") {
+					return this._initLoad(`${s}_<>_${e}`, async (i) => {
+						const r = s.split(".").pop(),
+							a = e.toLowerCase();
+						let o = null;
+						try {
+							r.startsWith("bin")
+								? (o = await customDracoLoader.loadAsync(s))
+								: (o = await bufferGeometryLoader.loadAsync(s)),
+								(o._loadMode = e),
+								a.includes("uv2") &&
+									!o.hasAttribute("uv2") &&
+									o.hasAttribute("uv") &&
+									o.setAttribute("uv2", o.attributes.uv.clone()),
+								i(o);
+						} catch (l) {
+							console.log("Geometry loader", l), i(fallbackGeometry);
+						}
+					});
+				},
+				instanced(s, e, i = "load") {
+					return this._initLoad(`instanced_<>_${s}-${e}`, async (r) => {
+						const [a, o] = await Promise.all([this[i](s), this.load(e)]);
+						r(createInstancedGeometry$1(a, o));
+					});
+				},
+				instancedPatches(
+					s,
+					e,
+					{ maxPerPatch: i = 25, maxDistance: r = 50 } = {},
+					a = "load"
+				) {
+					return this._initLoad(
+						`instancedPatches_<>_${s}-${e}-${i}-${r}`,
+						async (o) => {
+							const [l, c] = await Promise.all([this[a](s), this.load(e)]);
+							o(
+								createInstancedGeometryPatches(l, c, {
+									maxPerPatch: i,
+									maxDistance: r,
+									name: e,
+								})
+							);
+						}
+					);
+				},
+				vertexAnimation(s) {
+					return this._initLoad(`vertexanimation_<>_${s}`, async (e) => {
+						const i = await this.load(s);
+						e(createVertexAnimation(i));
+					});
+				},
+				curves(s, e = !1, i = 1) {
+					return this._initLoad(`curves_<>_${s}_${e}_${i}`, async (r) => {
+						const a = await this.load(s);
+						r(createCurves(a, i, e));
+					});
+				},
+				pointAnimation(s) {
+					return this._initLoad(`pointAnimation_<>_${s}}`, async (e) => {
+						const i = await this.load(s);
+						e(new pointAnimation(i));
+					});
+				},
+				skin(s, e) {
+					return this._initLoad(`skin_<>_${s}-${e}`, async (i) => {
+						const [r, a] = await Promise.all([this.load(s), this.load(e)]);
+						i(createSkin(r, a));
+					});
+				},
+				skinAnimation(s) {
+					return this._initLoad(`skinanimation_<>_${s}`, async (e) => {
+						const i = await this.load(s);
+						e(createSkinAnimation(s, i));
+					});
+				},
+			};
+
+			let modelUrl = "gossip.bin"; // 'blurrytext_cylinder.drc' // "house1.bin"; // 'blurrytext_cylinder.drc' // '../../examples/models/gltf/LittlestTokyo.glb'  //
+
+			const customDRACOLoader = new CustomDRACOLoader();
+
+
+
+			customDRACOLoader.loadAsync(modelUrl).then((modelRes) => {
+				debugger;
+
+				const material = new THREE.MeshStandardMaterial({ color: 0x00ff00 });
+				// 生成网格对象
+				const mesh = new THREE.Mesh(modelRes, material);
+				mesh.position.set(-55.9016, 1.47639, -47.3277),
+				// mesh.rotation.set(0, math.radians(-87.0408), 0),
+				scene.add(mesh);
+			});
+
+			// const modelRes = customDRACOLoader.loadAsync(modelUrl);
+			// debugger;
+			// const material = new THREE.MeshStandardMaterial({ color: 0x00ff00 });
+			// // 生成网格对象
+			// const mesh = new THREE.Mesh(modelRes, material);
+			// mesh.position.set(0, 0, 0);
+			// scene.add(mesh);
+
+			// dracoLoader.load(
+			// 	modelUrl,
+			// 	function (gltf) {
+			// 		debugger;
+			// 		const material = new THREE.MeshStandardMaterial({ color: 0x00ff00 });
+			// 		// 生成网格对象
+			// 		const mesh = new THREE.Mesh(gltf, material);
+			// 		mesh.position.set(0, 0, 0);
+			// 		scene.add(mesh);
+			// 		// debugger
+			// 		// const model = gltf.scene;
+			// 		// model.position.set( 1, 1, 0 );
+			// 		// model.scale.set( 0.01, 0.01, 0.01 );
+			// 		// scene.add( model );
+
+			// 		// mixer = new THREE.AnimationMixer( model );
+			// 		// mixer.clipAction( gltf.animations[ 0 ] ).play();
+
+			// 		renderer.setAnimationLoop(animate);
+			// 	},
+			// 	undefined,
+			// 	function (e) {
+			// 		console.error(e);
+			// 	}
+			// );
+
+			window.onresize = function () {
+				camera.aspect = window.innerWidth / window.innerHeight;
+				camera.updateProjectionMatrix();
+
+				renderer.setSize(window.innerWidth, window.innerHeight);
+			};
+
+			function animate() {
+				const delta = clock.getDelta();
+
+				// mixer.update( delta );
+
+				controls.update();
+
+				stats.update();
+
+				renderer.render(scene, camera);
+			}
+		</script>
+	</body>
+</html>

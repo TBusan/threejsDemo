@@ -75,54 +75,40 @@
 			// 存储线段数据
 			let tempSegment = new THREE.Line3();
 
-			debugger;
-
 			// let params = { up: "+Y" };
 
 			const params = {
 				up: "+Y",
-
 				firstPerson: false, // 是否第一人称
-
-				displayCollider: false, // 是否显示碰撞体
-
+				displayCollider: false, // 是否显示碰撞
 				displayBVH: false, // 是否显示BVH
-
 				visualizeDepth: 10, // BVH深度
-
 				gravity: -30, // 重力
-
 				playerSpeed: 10, // 玩家速度
-
-				physicsSteps: 5, // 物理模拟的步数
-
+				physicsSteps: 4, // 物理模拟的步数
 				reset: reset, // 是否重置
 			};
-
-			const scene = new THREE.Scene();
-
 			let clock = new THREE.Clock();
-
+			const scene = new THREE.Scene();
 			const camera = new THREE.PerspectiveCamera(
 				75,
 				window.innerWidth / window.innerHeight,
 				0.1,
 				1000
 			);
-			const renderer = new THREE.WebGLRenderer({ antialias: true });
-
-			renderer.setSize(window.innerWidth, window.innerHeight);
-			document.body.appendChild(renderer.domElement);
+			camera.position.set(-10, 10, -10);
+			camera.lookAt(new THREE.Vector3(0, 0, 0));
+		
 
 			const ambientLight = new THREE.AmbientLight(0xffffff, 0.5);
 			scene.add(ambientLight);
-
 			const directionalLight = new THREE.DirectionalLight(0xffffff, 0.5);
 			directionalLight.position.set(5, 10, 5);
 			scene.add(directionalLight);
 
-			camera.position.set(-10, 10, -10);
-			camera.lookAt(new THREE.Vector3(0, 0, 0));
+			const renderer = new THREE.WebGLRenderer({ antialias: true });
+			renderer.setSize(window.innerWidth, window.innerHeight);
+			document.body.appendChild(renderer.domElement);
 
 			box = new THREE.Box3();
 			sphere = new THREE.Sphere();
@@ -134,7 +120,8 @@
 				new THREE.MeshStandardMaterial()
 			);
 			// 几何体沿着Y轴负方向平移了0.5个单位，使得玩家模型的底部与网格的原点对齐。
-			player.geometry.translate(0, -0.5, 0);
+			// player.geometry.translate(0, -0.5, 0);
+			player.geometry.translate(10, -0.5, -4);
 
 			// 包含了玩家的胶囊碰撞器的信息，其中radius表示碰撞器的半径，segment表示碰撞器的线段，用于进行碰撞检测。
 			player.capsuleInfo = {
@@ -200,14 +187,14 @@
 
 			const toMerge = {};
 			let environment = new THREE.Group();
+			let loadIndex = 0;
 			function onLoadModel({ scene }) {
 				console.log("3D Tiles 数据加载完成");
-
 				// const box = new THREE.Box3();
 				// box.setFromObject(scene);
 				// box.getCenter(scene.position).negate();
 				// scene.updateMatrixWorld(true);
-
+				loadIndex++;
 				scene.traverse((c) => {
 					if (c.material && c.material.color.r === 1.0) {
 						return;
@@ -254,24 +241,26 @@
 
 				// 这几行代码使用静态几何体生成器StaticGeometryGenerator从环境对象中生成合并后的几何体，
 				// 并为生成的几何体创建了边界体层次结构（BVH）。
-				const staticGenerator = new StaticGeometryGenerator(environment);
-				staticGenerator.attributes = ["position"];
 
-				const mergedGeometry = staticGenerator.generate();
-				mergedGeometry.boundsTree = new MeshBVH(mergedGeometry);
+				if (loadIndex > 42) {
+					console.log('------------')
+					const staticGenerator = new StaticGeometryGenerator(environment);
+					staticGenerator.attributes = ["position"];
 
-				// 这几行代码创建了一个网格对象作为碰撞器，并设置了碰撞器的材质为半透明的线框材质。
-				collider = new THREE.Mesh(mergedGeometry);
-				collider.material.wireframe = true;
-				collider.material.opacity = 0.5;
-				collider.material.transparent = true;
-
-				// 这几行代码创建了一个用于可视化碰撞器边界体层次结构的辅助对象，并将其添加到场景中。
-				// 然后，将碰撞器、环境对象以及辅助对象都添加到了场景中
-				visualizer = new MeshBVHHelper(collider, params.visualizeDepth);
-				scene.add(visualizer);
-				scene.add(collider);
-				scene.add(environment);
+					const mergedGeometry = staticGenerator.generate();
+					mergedGeometry.boundsTree = new MeshBVH(mergedGeometry);
+					// 这几行代码创建了一个网格对象作为碰撞器，并设置了碰撞器的材质为半透明的线框材质。
+					collider = new THREE.Mesh(mergedGeometry);
+					collider.material.wireframe = true;
+					collider.material.opacity = 0.5;
+					collider.material.transparent = true;
+					// 这几行代码创建了一个用于可视化碰撞器边界体层次结构的辅助对象，并将其添加到场景中。
+					// 然后，将碰撞器、环境对象以及辅助对象都添加到了场景中
+					visualizer = new MeshBVHHelper(collider, params.visualizeDepth);
+					scene.add(visualizer);
+					scene.add(collider);
+					scene.add(environment);
+				}
 
 				const boundingSphere = scene.boundingSphere;
 				if (boundingSphere) {
@@ -288,7 +277,12 @@
 				}
 			}
 
+			// 这个会执行很长时间
+
+			let alltilesLoaded = false;
+
 			tileset.addEventListener("load-model", onLoadModel);
+
 			offsetParent.add(tileset.group);
 
 			window.addEventListener("keydown", function (e) {
@@ -343,18 +337,20 @@
 
 			//用于更新玩家角色的位置和状态
 			function updatePlayer(delta) {
-				console.log("updatePlayer");
+				// console.log("updatePlayer");
 				// 根据玩家是否在地面上，调整玩家的垂直速度。
 				// 根据物理规则，玩家在地面上时，垂直速度受重力影响；不在地面上时，垂直速度会逐渐增加。
 				if (playerIsOnGround) {
+					console.log("updatePlayer: playerIsOnGround");
 					playerVelocity.y = delta * params.gravity;
 				} else {
+					// console.log("updatePlayer:not playerIsOnGround");
 					playerVelocity.y += delta * params.gravity;
 				}
 
 				// 根据玩家的速度和时间间隔，更新玩家的位置。
 				player.position.addScaledVector(playerVelocity, delta);
-
+				console.log('999999',player.position.y)
 				// move the player
 				// 获取相机控制器的方位角，用于确定玩家的移动方向。
 				const angle = controls.getAzimuthalAngle();
@@ -439,6 +435,7 @@
 
 						// 如果距离小于半径，表示碰撞发生，需要对碰撞体位置进行调整
 						if (distance < capsuleInfo.radius) {
+							console.log("碰撞");
 							const depth = capsuleInfo.radius - distance;
 							const direction = capsulePoint.sub(triPoint).normalize();
 
@@ -459,8 +456,9 @@
 				deltaVector.subVectors(newPosition, player.position);
 
 				// if the player was primarily adjusted vertically we assume it's on something we should consider ground
-				playerIsOnGround =
-					deltaVector.y > Math.abs(delta * playerVelocity.y * 0.25);
+				// console.log('deltaVector.y',deltaVector.y,'Math.abs(delta * playerVelocity.y * 0.25)',Math.abs(delta * playerVelocity.y * 0.25))
+				// playerIsOnGround = deltaVector.y > Math.abs(delta * playerVelocity.y * 0.25);
+				playerIsOnGround = deltaVector.y > 0;
 
 				const offset = Math.max(0.0, deltaVector.length() - 1e-5);
 				deltaVector.normalize().multiplyScalar(offset);
@@ -526,8 +524,9 @@
 					}
 				}
 
-				camera.updateMatrixWorld();
+				// camera.updateMatrixWorld();
 				tileset.update();
+				controls.update();
 				renderer.render(scene, camera);
 			}
 			animate();

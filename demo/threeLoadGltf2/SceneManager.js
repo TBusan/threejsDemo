@@ -245,7 +245,7 @@ class SceneManager {
 
     setupSelectionControls() {
         this.renderer.domElement.addEventListener('click', (event) => {
-            debugger
+            
             if (!this.isSelectMode) return;
             
 
