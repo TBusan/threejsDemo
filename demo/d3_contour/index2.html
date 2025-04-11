@@ -2,43 +2,43 @@
 <html>
 <head>
     <meta charset="utf-8">
-    <title>D3.js 复杂等值线图</title>
+    <title>Three.js 等值线渲染</title>
     <script src="https://d3js.org/d3.v7.min.js"></script>
+    <!-- <script src="https://threejs.org/build/three.min.js"></script>
+    <script src="https://threejs.org/examples/js/controls/OrbitControls.js"></script> -->
     <style>
-        .container {
-            margin: 20px;
-            padding: 20px;
-            background: #f8f9fa;
-        }
-        .contour-path {
-            mix-blend-mode: multiply;
-        }
-        .hover-text {
-            font-size: 12px;
-            fill: #333;
-            pointer-events: none;
+        body { margin: 0; overflow: hidden; }
+        canvas { display: block; }
+        #info {
+            position: absolute;
+            top: 10px;
+            width: 100%;
+            text-align: center;
+            color: white;
+            font-family: Arial, sans-serif;
         }
     </style>
 </head>
 <body>
-    <div id="chart"></div>
-
-    <script>
+    <div id="info">Three.js 等值线渲染 (从 D3.js 数据提取)</div>
+    <div id="container"></div>
+    <script type="importmap">
+        {
+            "imports": {
+                "three": "../../build/three.module.js",
+                "three/addons/": "../../examples/jsm/"
+            }
+        }
+    </script>
+    <script type="module">
+        // ===== D3.js 部分：生成等值线数据 =====
+        import * as THREE from 'three';
+        import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
         // 配置参数
         const width = 800;
         const height = 600;
-        const margin = { top: 40, right: 30, bottom: 50, left: 50 };
-        const innerWidth = width - margin.left - margin.right;
-        const innerHeight = height - margin.top - margin.bottom;
-
-        // 创建SVG容器
-        const svg = d3.select("#chart")
-            .append("svg")
-            .attr("width", width)
-            .attr("height", height)
-            .append("g")
-            .attr("transform", `translate(${margin.left},${margin.top})`);
-
+        const resolution = 256; // 纹理分辨率
+        
         // 生成随机数据（高斯分布）
         const generateData = (n, mean, variance) => {
             return Array.from({ length: n }, () => {
@@ -58,124 +58,176 @@
 
         // 创建密度计算器
         const density = d3.contourDensity()
-            .x(d => d[0] * innerWidth)
-            .y(d => d[1] * innerHeight)
-            .size([innerWidth, innerHeight])
+            .x(d => d[0] * width)
+            .y(d => d[1] * height)
+            .size([width, height])
             .bandwidth(20)
             .thresholds(20);
 
         // 计算等值线
         const contours = density(data);
-
-        // 创建比例尺
-        const xScale = d3.scaleLinear()
-            .domain([0, 1])
-            .range([0, innerWidth]);
-
-        const yScale = d3.scaleLinear()
-            .domain([0, 1])
-            .range([innerHeight, 0]);
-
+        
         // 颜色比例尺
         const colorScale = d3.scaleSequential()
             .domain(d3.extent(contours, d => d.value))
             .interpolator(d3.interpolateYlGnBu);
-
-        // 创建路径生成器
-        const path = d3.geoPath();
-
-        // 添加剪切路径
-        svg.append("clipPath")
-            .attr("id", "clip")
-            .append("rect")
-            .attr("width", innerWidth)
-            .attr("height", innerHeight);
-
-        // 绘制等值线
-        const contourGroup = svg.append("g")
-            .attr("clip-path", "url(#clip)");
-
-        contourGroup.selectAll("path")
-            .data(contours)
-            .enter().append("path")
-            .attr("d", path)
-            .attr("fill", d => colorScale(d.value))
-            .attr("stroke", "#444")
-            .attr("stroke-width", 0.5)
-            .attr("class", "contour-path")
-            .on("mouseover", function(event, d) {
-                d3.select(this)
-                    .attr("stroke", "#e41a1c")
-                    .attr("stroke-width", 2);
+            
+        // 创建离屏 Canvas 进行纹理渲染
+        const textureCanvas = document.createElement('canvas');
+        textureCanvas.width = resolution;
+        textureCanvas.height = resolution;
+        const ctx = textureCanvas.getContext('2d');
+        
+        // 清除背景
+        ctx.fillStyle = '#ffffff';
+        ctx.fillRect(0, 0, resolution, resolution);
+        
+        // 对 Canvas 进行缩放以匹配分辨率
+        const scaleX = resolution / width;
+        const scaleY = resolution / height;
+        ctx.scale(scaleX, scaleY);
+        
+        // 绘制等值线到 Canvas
+        const path = d3.geoPath().context(ctx);
+        
+        // 先绘制所有填充区域
+        contours.forEach(d => {
+            ctx.beginPath();
+            path(d);
+            ctx.fillStyle = colorScale(d.value);
+            ctx.fill();
+        });
+        
+        // 再绘制所有线条
+        contours.forEach(d => {
+            ctx.beginPath();
+            path(d);
+            ctx.strokeStyle = 'rgba(0,0,0,0.3)';
+            ctx.lineWidth = 0.5;
+            ctx.stroke();
+        });
+        
+        // ===== Three.js 部分：3D 渲染 =====
+        
+        // 设置 Three.js 场景
+        const scene = new THREE.Scene();
+        scene.background = new THREE.Color(0xf0f0f0);
+        
+        // 设置摄像机
+        const camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 1000);
+        camera.position.set(0, 0, 1.5);
+        
+        // 设置渲染器
+        const renderer = new THREE.WebGLRenderer({ antialias: true });
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        document.getElementById('container').appendChild(renderer.domElement);
+        
+        // 添加轨道控制
+        const controls = new OrbitControls(camera, renderer.domElement);
+        controls.enableDamping = true;
+        controls.dampingFactor = 0.25;
+        
+        // 创建从 Canvas 纹理
+        const texture = new THREE.CanvasTexture(textureCanvas);
+        texture.needsUpdate = true;
+        
+        // 创建基础平面材质
+        const material = new THREE.MeshBasicMaterial({ 
+            map: texture,
+            side: THREE.DoubleSide
+        });
+        
+        // 创建平面几何体（保持1:1比例）
+        const aspectRatio = width / height;
+        const planeGeometry = new THREE.PlaneGeometry(1 * aspectRatio, 1);
+        
+        // 创建网格
+        const plane = new THREE.Mesh(planeGeometry, material);
+        scene.add(plane);
+        
+        // ===== 为每个等值线创建 3D 高程效果 =====
+        
+        // 获取每个等值线的高度值
+        const heightScale = 0.1; // 高度缩放系数
+        const minValue = d3.min(contours, d => d.value);
+        const maxValue = d3.max(contours, d => d.value);
+        
+        // 对每个等值线创建挤压几何体
+        contours.forEach((contour, i) => {
+            // 将 D3 路径转换为 Three.js 形状
+            const shape = new THREE.Shape();
+            let started = false;
+            
+            // 提取路径点
+            const coordinates = contour.coordinates;
+            
+            // 处理所有轮廓
+            coordinates.forEach(ring => {
+                const contourPoints = ring[0]; // 使用第一个环
                 
-                svg.append("text")
-                    .attr("class", "hover-text")
-                    .attr("x", path.bounds(d)[0][0] + 10)
-                    .attr("y", path.bounds(d)[0][1] + 20)
-                    .text(`Value: ${d.value.toFixed(3)}`);
-            })
-            .on("mouseout", function() {
-                d3.select(this)
-                    .attr("stroke", "#444")
-                    .attr("stroke-width", 0.5);
-                
-                svg.selectAll(".hover-text").remove();
+                contourPoints.forEach((point, j) => {
+                    // 归一化坐标
+                    const x = (point[0] / width - 0.5) * aspectRatio;
+                    const y = -(point[1] / height - 0.5); // Y 坐标反转
+                    
+                    if (j === 0) {
+                        shape.moveTo(x, y);
+                    } else {
+                        shape.lineTo(x, y);
+                    }
+                });
             });
-
-        // 添加坐标轴
-        const xAxis = d3.axisBottom(xScale).ticks(5);
-        const yAxis = d3.axisLeft(yScale).ticks(5);
-
-        svg.append("g")
-            .attr("transform", `translate(0, ${innerHeight})`)
-            .call(xAxis)
-            .append("text")
-            .attr("x", innerWidth / 2)
-            .attr("y", 35)
-            .attr("fill", "#000")
-            .text("X Axis");
-
-        svg.append("g")
-            .call(yAxis)
-            .append("text")
-            .attr("transform", "rotate(-90)")
-            .attr("y", -35)
-            .attr("x", -innerHeight / 2)
-            .attr("fill", "#000")
-            .text("Y Axis");
-
-        // 添加标题
-        svg.append("text")
-            .attr("x", innerWidth / 2)
-            .attr("y", -10)
-            .attr("text-anchor", "middle")
-            .style("font-size", "16px")
-            .text("核密度等值线图");
-
-        // 添加图例
-        const legend = svg.append("g")
-            .attr("transform", `translate(${innerWidth - 120}, 20)`);
-
-        const legendScale = d3.scaleLinear()
-            .domain(colorScale.domain())
-            .range([0, 100]);
-
-        const legendAxis = d3.axisRight(legendScale)
-            .ticks(5)
-            .tickSize(4);
-
-        legend.selectAll("rect")
-            .data(d3.range(100))
-            .enter().append("rect")
-            .attr("x", 0)
-            .attr("y", d => d)
-            .attr("width", 20)
-            .attr("height", 1)
-            .attr("fill", d => colorScale(legendScale.invert(d)));
-
-        legend.append("g")
-            .attr("transform", "translate(20, 0)")
-            .call(legendAxis);
+            
+            // 创建挤压几何体
+            const extrudeSettings = {
+                steps: 1,
+                depth: ((contour.value - minValue) / (maxValue - minValue)) * heightScale,
+                bevelEnabled: false
+            };
+            
+            const contourGeometry = new THREE.ExtrudeGeometry(shape, extrudeSettings);
+            
+            // 创建材质
+            const contourMaterial = new THREE.MeshPhongMaterial({
+                color: new THREE.Color(colorScale(contour.value)),
+                transparent: true,
+                opacity: 0.8,
+                side: THREE.DoubleSide
+            });
+            
+            // 创建网格并添加到场景
+            const contourMesh = new THREE.Mesh(contourGeometry, contourMaterial);
+            contourMesh.position.z = 0.01 * i; // 稍微偏移，避免 z-fighting
+            scene.add(contourMesh);
+        });
+        
+        // 添加光源
+        const ambientLight = new THREE.AmbientLight(0xffffff, 0.6);
+        scene.add(ambientLight);
+        
+        const directionalLight = new THREE.DirectionalLight(0xffffff, 0.8);
+        directionalLight.position.set(1, 1, 1);
+        scene.add(directionalLight);
+        
+        // 添加坐标轴辅助
+        const axesHelper = new THREE.AxesHelper(1);
+        scene.add(axesHelper);
+        
+        // 窗口大小调整处理
+        window.addEventListener('resize', () => {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        });
+        
+        // 动画循环
+        function animate() {
+            requestAnimationFrame(animate);
+            controls.update();
+            renderer.render(scene, camera);
+        }
+        
+        animate();
     </script>
 </body>
 </html>
