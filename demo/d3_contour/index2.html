@@ -116,9 +116,15 @@
         // 设置摄像机
         const camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 1000);
         camera.position.set(0, 0, 1.5);
-        
+        const renderer = new THREE.WebGLRenderer({ 
+            antialias: true,
+        });
         // 设置渲染器
-        const renderer = new THREE.WebGLRenderer({ antialias: true });
+        // const renderer = new THREE.WebGLRenderer({ 
+        //     antialias: true,
+        //     logarithmicDepthBuffer: true  // Add logarithmic depth buffer to solve Z-fighting
+        // });
+        // renderer.setPixelRatio(window.devicePixelRatio);
         renderer.setSize(window.innerWidth, window.innerHeight);
         document.getElementById('container').appendChild(renderer.domElement);
         
@@ -148,7 +154,8 @@
         // ===== 为每个等值线创建 3D 高程效果 =====
         
         // 获取每个等值线的高度值
-        const heightScale = 0.1; // 高度缩放系数
+        const heightScale = 0.05; // Reduce overall height
+        const layerGap = 0.02;    // Add explicit layer spacing
         const minValue = d3.min(contours, d => d.value);
         const maxValue = d3.max(contours, d => d.value);
         
@@ -161,27 +168,26 @@
             // 提取路径点
             const coordinates = contour.coordinates;
             
-            // 处理所有轮廓
-            coordinates.forEach(ring => {
-                const contourPoints = ring[0]; // 使用第一个环
+            // 简化点集以减少复杂度
+            const simplifiedPoints = simplifyPoints(coordinates[0][0], 0.5);
+            
+            simplifiedPoints.forEach((point, j) => {
+                // 归一化坐标
+                const x = (point[0] / width - 0.5) * aspectRatio;
+                const y = -(point[1] / height - 0.5); // Y 坐标反转
                 
-                contourPoints.forEach((point, j) => {
-                    // 归一化坐标
-                    const x = (point[0] / width - 0.5) * aspectRatio;
-                    const y = -(point[1] / height - 0.5); // Y 坐标反转
-                    
-                    if (j === 0) {
-                        shape.moveTo(x, y);
-                    } else {
-                        shape.lineTo(x, y);
-                    }
-                });
+                if (j === 0) {
+                    shape.moveTo(x, y);
+                } else {
+                    shape.lineTo(x, y);
+                }
             });
             
             // 创建挤压几何体
+            const normalizedValue = (contour.value - minValue) / (maxValue - minValue);
             const extrudeSettings = {
-                steps: 1,
-                depth: ((contour.value - minValue) / (maxValue - minValue)) * heightScale,
+                steps: 2, // Increase steps for smoother sides
+                depth: normalizedValue * heightScale,
                 bevelEnabled: false
             };
             
@@ -192,12 +198,16 @@
                 color: new THREE.Color(colorScale(contour.value)),
                 transparent: true,
                 opacity: 0.8,
-                side: THREE.DoubleSide
+                side: THREE.DoubleSide,
+                depthWrite: true,       // Ensure depth writing
+                polygonOffset: true,    // Enable polygon offset
+                polygonOffsetFactor: 1, // Offset factor
+                polygonOffsetUnits: 1   // Offset units
             });
             
             // 创建网格并添加到场景
             const contourMesh = new THREE.Mesh(contourGeometry, contourMaterial);
-            contourMesh.position.z = 0.01 * i; // 稍微偏移，避免 z-fighting
+            contourMesh.position.z = layerGap * i; 
             scene.add(contourMesh);
         });
         
@@ -228,6 +238,31 @@
         }
         
         animate();
+
+        // Add point set simplification function
+        function simplifyPoints(points, tolerance) {
+            if (points.length <= 2) return points;
+            
+            // Simple distance function
+            const distSquared = (p1, p2) => {
+                const dx = p1[0] - p2[0];
+                const dy = p1[1] - p2[1];
+                return dx * dx + dy * dy;
+            };
+            
+            const result = [points[0]];
+            let lastPoint = points[0];
+            
+            for (let i = 1; i < points.length - 1; i++) {
+                if (distSquared(points[i], lastPoint) > tolerance * tolerance) {
+                    result.push(points[i]);
+                    lastPoint = points[i];
+                }
+            }
+            
+            result.push(points[points.length - 1]);
+            return result;
+        }
     </script>
 </body>
 </html>
