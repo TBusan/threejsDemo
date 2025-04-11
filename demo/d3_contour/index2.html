@@ -121,6 +121,8 @@
             logarithmicDepthBuffer: true  // 启用对数深度缓冲解决Z-fighting
         });
         renderer.setPixelRatio(window.devicePixelRatio);
+        // 启用深度排序，减少透明物体渲染问题
+        renderer.sortObjects = true;
         renderer.setSize(window.innerWidth, window.innerHeight);
         document.getElementById('container').appendChild(renderer.domElement);
         
@@ -145,6 +147,8 @@
         
         // 创建网格
         const plane = new THREE.Mesh(planeGeometry, material);
+        // 将底部平面向下移动一点，避免与等值线层发生深度冲突
+        plane.position.z = -0.01;
         scene.add(plane);
         
         // ===== 为每个等值线创建 3D 高程效果 =====
@@ -220,14 +224,15 @@
                     side: THREE.DoubleSide,
                     depthWrite: true,
                     polygonOffset: true,
-                    polygonOffsetFactor: i, // 使用索引作为偏移因子，确保正确分层
+                    polygonOffsetFactor: i + 1, // 增加偏移因子，确保与基础平面不发生冲突
                     polygonOffsetUnits: 1
                 });
                 
                 // 创建网格并添加到场景
                 const contourMesh = new THREE.Mesh(contourGeometry, contourMaterial);
-                // 每个层的Z值应该是前一层的高度加上间隔
-                contourMesh.position.z = i * layerGap;
+                // 确保最低层也有足够的Z偏移
+                contourMesh.position.z = Math.max(0.005, i * layerGap);
+                contourMesh.renderOrder = i + 1; // 设置明确的渲染顺序
                 scene.add(contourMesh);
             });
         });
