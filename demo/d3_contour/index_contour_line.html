@@ -2,10 +2,8 @@
 <html>
 <head>
     <meta charset="utf-8">
-    <title>Three.js 等值线渲染</title>
+    <title>Three.js 等值线环状渲染</title>
     <script src="https://d3js.org/d3.v7.min.js"></script>
-    <!-- <script src="https://threejs.org/build/three.min.js"></script>
-    <script src="https://threejs.org/examples/js/controls/OrbitControls.js"></script> -->
     <style>
         body { margin: 0; overflow: hidden; }
         canvas { display: block; }
@@ -30,9 +28,9 @@
     </style>
 </head>
 <body>
-    <div id="info">Three.js 等值线渲染 (从 D3.js 数据提取)</div>
+    <div id="info">Three.js 等值线环状渲染 (从 D3.js 数据提取)</div>
     <div id="controls">
-        <label><input type="checkbox" id="enableExtrusion" checked> 启用3D挤压效果</label>
+        <div><label><input type="checkbox" id="enableExtrusion" checked> 启用3D挤压效果</label></div>
     </div>
     <div id="container"></div>
     <script type="importmap">
@@ -136,7 +134,6 @@
             logarithmicDepthBuffer: true  // 启用对数深度缓冲解决Z-fighting
         });
         renderer.setPixelRatio(window.devicePixelRatio);
-        // 启用深度排序，减少透明物体渲染问题
         renderer.sortObjects = true;
         renderer.setSize(window.innerWidth, window.innerHeight);
         document.getElementById('container').appendChild(renderer.domElement);
@@ -174,12 +171,12 @@
             // 清除现有的等值线网格
             contourMeshes.forEach(mesh => {
                 scene.remove(mesh);
-                mesh.geometry.dispose();
-                mesh.material.dispose();
+                if (mesh.geometry) mesh.geometry.dispose();
+                if (mesh.material) mesh.material.dispose();
             });
             contourMeshes.length = 0;
             
-            // ===== 为每个等值线创建 3D 高程效果 =====
+            // ===== 为每个等值线创建环状线框 =====
             
             // 获取每个等值线的高度值
             const heightScale = 0.05; // 整体高度比例
@@ -195,89 +192,84 @@
                 
                 // 处理所有轮廓部分（contour可能包含多个分离的部分）
                 contour.coordinates.forEach(polygon => {
-                    // 创建形状
-                    const shape = new THREE.Shape();
+                    // 线宽设置 - 根据值大小调整
+                    const linewidth = 1 + normalizedValue * 2;
                     
                     // 处理外环（第一个点集）
                     const outerRing = simplifyPoints(polygon[0], 0.5);
                     
-                    // 外环点集构建主形状
-                    outerRing.forEach((point, j) => {
-                        // 归一化坐标
+                    // 创建线框几何体
+                    const points = [];
+                    
+                    // 添加外环点
+                    outerRing.forEach(point => {
                         const x = (point[0] / width - 0.5) * aspectRatio;
-                        const y = -(point[1] / height - 0.5); // Y坐标反转
-                        
-                        if (j === 0) {
-                            shape.moveTo(x, y);
-                        } else {
-                            shape.lineTo(x, y);
-                        }
+                        const y = -(point[1] / height - 0.5); 
+                        points.push(new THREE.Vector3(x, y, 0));
                     });
                     
-                    // 处理内环（如果有的话）- 这些是形状中的"孔"
+                    // 闭合路径
+                    if (points.length > 0) {
+                        const firstPoint = points[0];
+                        points.push(new THREE.Vector3(firstPoint.x, firstPoint.y, 0));
+                    }
+                    
+                    // 为线段创建几何体
+                    const lineGeometry = new THREE.BufferGeometry().setFromPoints(points);
+                    
+                    // 创建线材质
+                    const lineMaterial = new THREE.LineBasicMaterial({ 
+                        color: new THREE.Color(colorScale(contour.value)),
+                        linewidth: linewidth
+                    });
+                    
+                    // 创建线对象
+                    const line = new THREE.Line(lineGeometry, lineMaterial);
+                    
+                    // 设置Z位置
+                    if (enableExtrusion) {
+                        line.position.z = Math.max(0.005, i * layerGap) + (extrudeHeight * 0.95);
+                    } else {
+                        line.position.z = 0.001;
+                    }
+                    
+                    line.renderOrder = i + 1;
+                    scene.add(line);
+                    contourMeshes.push(line);
+                    
+                    // 如果有内环，也添加内环
                     if (polygon.length > 1) {
                         for (let h = 1; h < polygon.length; h++) {
                             const holePoints = simplifyPoints(polygon[h], 0.5);
-                            const holePath = new THREE.Path();
+                            let holeLinePoints = [];
                             
-                            holePoints.forEach((point, j) => {
+                            holePoints.forEach(point => {
                                 const x = (point[0] / width - 0.5) * aspectRatio;
                                 const y = -(point[1] / height - 0.5);
-                                
-                                if (j === 0) {
-                                    holePath.moveTo(x, y);
-                                } else {
-                                    holePath.lineTo(x, y);
-                                }
+                                holeLinePoints.push(new THREE.Vector3(x, y, 0));
                             });
                             
-                            shape.holes.push(holePath);
+                            // 闭合内环
+                            if (holeLinePoints.length > 0) {
+                                const firstHolePoint = holeLinePoints[0];
+                                holeLinePoints.push(new THREE.Vector3(firstHolePoint.x, firstHolePoint.y, 0));
+                            }
+                            
+                            const holeGeometry = new THREE.BufferGeometry().setFromPoints(holeLinePoints);
+                            const holeLine = new THREE.Line(holeGeometry, lineMaterial);
+                            
+                            // 设置与外环相同的Z位置
+                            if (enableExtrusion) {
+                                holeLine.position.z = Math.max(0.005, i * layerGap) + (extrudeHeight * 0.95);
+                            } else {
+                                holeLine.position.z = 0.001;
+                            }
+                            
+                            holeLine.renderOrder = i + 1;
+                            scene.add(holeLine);
+                            contourMeshes.push(holeLine);
                         }
                     }
-                    
-                    // 根据挤压设置选择几何体
-                    let contourGeometry;
-                    if (enableExtrusion) {
-                        // 创建挤压几何体
-                        const extrudeSettings = {
-                            steps: 2,
-                            depth: extrudeHeight,
-                            bevelEnabled: false
-                        };
-                        contourGeometry = new THREE.ExtrudeGeometry(shape, extrudeSettings);
-                    } else {
-                        // 创建平面几何体 (无挤压)
-                        contourGeometry = new THREE.ShapeGeometry(shape);
-                    }
-                    
-                    // 创建材质
-                    const contourMaterial = new THREE.MeshPhongMaterial({
-                        color: new THREE.Color(colorScale(contour.value)),
-                        transparent: true,
-                        opacity: 0.9,
-                        side: THREE.DoubleSide,
-                        depthWrite: true,
-                        polygonOffset: true,
-                        polygonOffsetFactor: i + 1, // 增加偏移因子，确保与基础平面不发生冲突
-                        polygonOffsetUnits: 1
-                    });
-                    
-                    // 创建网格并添加到场景
-                    const contourMesh = new THREE.Mesh(contourGeometry, contourMaterial);
-                    
-                    // Z位置设置
-                    if (enableExtrusion) {
-                        // 确保最低层也有足够的Z偏移
-                        contourMesh.position.z = Math.max(0.005, i * layerGap);
-                    } else {
-                        // 平面模式下使用固定间隔
-                        // contourMesh.position.z = 0.002 + i * 0.001;
-                        contourMesh.position.z = 0.001; // 使用固定值，保证所有等值线在同一平面
-                    }
-                    
-                    contourMesh.renderOrder = i + 1; // 设置明确的渲染顺序
-                    scene.add(contourMesh);
-                    contourMeshes.push(contourMesh);
                 });
             });
         }
@@ -319,11 +311,11 @@
         
         animate();
 
-        // Add point set simplification function
+        // 点集简化函数
         function simplifyPoints(points, tolerance) {
             if (points.length <= 2) return points;
             
-            // Simple distance function
+            // 简单距离函数
             const distSquared = (p1, p2) => {
                 const dx = p1[0] - p2[0];
                 const dy = p1[1] - p2[1];

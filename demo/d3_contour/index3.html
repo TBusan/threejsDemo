@@ -53,7 +53,7 @@
         const resolution = 256; // 纹理分辨率
         // 挤压控制参数
         let enableExtrusion = true; // 默认启用挤压效果
-
+        
         // 生成随机数据（高斯分布）
         const generateData = (n, mean, variance) => {
             return Array.from({ length: n }, () => {
@@ -81,12 +81,12 @@
 
         // 计算等值线
         const contours = density(data);
-
+        
         // 颜色比例尺
         const colorScale = d3.scaleSequential()
             .domain(d3.extent(contours, d => d.value))
             .interpolator(d3.interpolateYlGnBu);
-
+            
         // 创建离屏 Canvas 进行纹理渲染
         const textureCanvas = document.createElement('canvas');
         textureCanvas.width = resolution;
@@ -271,8 +271,7 @@
                         contourMesh.position.z = Math.max(0.005, i * layerGap);
                     } else {
                         // 平面模式下使用固定间隔
-                        // contourMesh.position.z = 0.002 + i * 0.001;
-                        contourMesh.position.z = 0.001; // 使用固定值，保证所有等值线在同一平面
+                        contourMesh.position.z = 0.002 + i * 0.001;
                     }
                     
                     contourMesh.renderOrder = i + 1; // 设置明确的渲染顺序
