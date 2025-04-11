@@ -17,10 +17,23 @@
             color: white;
             font-family: Arial, sans-serif;
         }
+        #controls {
+            position: absolute;
+            top: 40px;
+            left: 10px;
+            background: rgba(0,0,0,0.5);
+            padding: 10px;
+            border-radius: 5px;
+            color: white;
+            font-family: Arial, sans-serif;
+        }
     </style>
 </head>
 <body>
     <div id="info">Three.js 等值线渲染 (从 D3.js 数据提取)</div>
+    <div id="controls">
+        <label><input type="checkbox" id="enableExtrusion" checked> 启用3D挤压效果</label>
+    </div>
     <div id="container"></div>
     <script type="importmap">
         {
@@ -38,6 +51,8 @@
         const width = 800;
         const height = 600;
         const resolution = 256; // 纹理分辨率
+        // 挤压控制参数
+        let enableExtrusion = true; // 默认启用挤压效果
         
         // 生成随机数据（高斯分布）
         const generateData = (n, mean, variance) => {
@@ -151,91 +166,123 @@
         plane.position.z = -0.01;
         scene.add(plane);
         
-        // ===== 为每个等值线创建 3D 高程效果 =====
+        // 保存所有等值线网格的引用，以便更新
+        const contourMeshes = [];
         
-        // 获取每个等值线的高度值
-        const heightScale = 0.05; // 整体高度比例
-        const layerGap = 0.002;   // 减小层间距
-        const minValue = d3.min(contours, d => d.value);
-        const maxValue = d3.max(contours, d => d.value);
-        
-        // 对每个等值线创建挤压几何体
-        contours.forEach((contour, i) => {
-            // 获取归一化高度值
-            const normalizedValue = (contour.value - minValue) / (maxValue - minValue);
-            const extrudeHeight = normalizedValue * heightScale;
-            
-            // 处理所有轮廓部分（contour可能包含多个分离的部分）
-            contour.coordinates.forEach(polygon => {
-                // 创建形状
-                const shape = new THREE.Shape();
-                
-                // 处理外环（第一个点集）
-                const outerRing = simplifyPoints(polygon[0], 0.5);
-                
-                // 外环点集构建主形状
-                outerRing.forEach((point, j) => {
-                    // 归一化坐标
-                    const x = (point[0] / width - 0.5) * aspectRatio;
-                    const y = -(point[1] / height - 0.5); // Y坐标反转
-                    
-                    if (j === 0) {
-                        shape.moveTo(x, y);
-                    } else {
-                        shape.lineTo(x, y);
-                    }
-                });
-                
-                // 处理内环（如果有的话）- 这些是形状中的"孔"
-                if (polygon.length > 1) {
-                    for (let h = 1; h < polygon.length; h++) {
-                        const holePoints = simplifyPoints(polygon[h], 0.5);
-                        const holePath = new THREE.Path();
-                        
-                        holePoints.forEach((point, j) => {
-                            const x = (point[0] / width - 0.5) * aspectRatio;
-                            const y = -(point[1] / height - 0.5);
-                            
-                            if (j === 0) {
-                                holePath.moveTo(x, y);
-                            } else {
-                                holePath.lineTo(x, y);
-                            }
-                        });
-                        
-                        shape.holes.push(holePath);
-                    }
-                }
-                
-                // 创建挤压几何体
-                const extrudeSettings = {
-                    steps: 2,
-                    depth: extrudeHeight,
-                    bevelEnabled: false
-                };
-                
-                const contourGeometry = new THREE.ExtrudeGeometry(shape, extrudeSettings);
-                
-                // 创建材质
-                const contourMaterial = new THREE.MeshPhongMaterial({
-                    color: new THREE.Color(colorScale(contour.value)),
-                    transparent: true,
-                    opacity: 0.9,
-                    side: THREE.DoubleSide,
-                    depthWrite: true,
-                    polygonOffset: true,
-                    polygonOffsetFactor: i + 1, // 增加偏移因子，确保与基础平面不发生冲突
-                    polygonOffsetUnits: 1
-                });
-                
-                // 创建网格并添加到场景
-                const contourMesh = new THREE.Mesh(contourGeometry, contourMaterial);
-                // 确保最低层也有足够的Z偏移
-                contourMesh.position.z = Math.max(0.005, i * layerGap);
-                contourMesh.renderOrder = i + 1; // 设置明确的渲染顺序
-                scene.add(contourMesh);
+        // 创建等值线函数
+        function createContours() {
+            // 清除现有的等值线网格
+            contourMeshes.forEach(mesh => {
+                scene.remove(mesh);
+                mesh.geometry.dispose();
+                mesh.material.dispose();
             });
-        });
+            contourMeshes.length = 0;
+            
+            // ===== 为每个等值线创建 3D 高程效果 =====
+            
+            // 获取每个等值线的高度值
+            const heightScale = 0.05; // 整体高度比例
+            const layerGap = 0.002;   // 减小层间距
+            const minValue = d3.min(contours, d => d.value);
+            const maxValue = d3.max(contours, d => d.value);
+            
+            // 对每个等值线创建几何体
+            contours.forEach((contour, i) => {
+                // 获取归一化高度值
+                const normalizedValue = (contour.value - minValue) / (maxValue - minValue);
+                const extrudeHeight = normalizedValue * heightScale;
+                
+                // 处理所有轮廓部分（contour可能包含多个分离的部分）
+                contour.coordinates.forEach(polygon => {
+                    // 创建形状
+                    const shape = new THREE.Shape();
+                    
+                    // 处理外环（第一个点集）
+                    const outerRing = simplifyPoints(polygon[0], 0.5);
+                    
+                    // 外环点集构建主形状
+                    outerRing.forEach((point, j) => {
+                        // 归一化坐标
+                        const x = (point[0] / width - 0.5) * aspectRatio;
+                        const y = -(point[1] / height - 0.5); // Y坐标反转
+                        
+                        if (j === 0) {
+                            shape.moveTo(x, y);
+                        } else {
+                            shape.lineTo(x, y);
+                        }
+                    });
+                    
+                    // 处理内环（如果有的话）- 这些是形状中的"孔"
+                    if (polygon.length > 1) {
+                        for (let h = 1; h < polygon.length; h++) {
+                            const holePoints = simplifyPoints(polygon[h], 0.5);
+                            const holePath = new THREE.Path();
+                            
+                            holePoints.forEach((point, j) => {
+                                const x = (point[0] / width - 0.5) * aspectRatio;
+                                const y = -(point[1] / height - 0.5);
+                                
+                                if (j === 0) {
+                                    holePath.moveTo(x, y);
+                                } else {
+                                    holePath.lineTo(x, y);
+                                }
+                            });
+                            
+                            shape.holes.push(holePath);
+                        }
+                    }
+                    
+                    // 根据挤压设置选择几何体
+                    let contourGeometry;
+                    if (enableExtrusion) {
+                        // 创建挤压几何体
+                        const extrudeSettings = {
+                            steps: 2,
+                            depth: extrudeHeight,
+                            bevelEnabled: false
+                        };
+                        contourGeometry = new THREE.ExtrudeGeometry(shape, extrudeSettings);
+                    } else {
+                        // 创建平面几何体 (无挤压)
+                        contourGeometry = new THREE.ShapeGeometry(shape);
+                    }
+                    
+                    // 创建材质
+                    const contourMaterial = new THREE.MeshPhongMaterial({
+                        color: new THREE.Color(colorScale(contour.value)),
+                        transparent: true,
+                        opacity: 0.9,
+                        side: THREE.DoubleSide,
+                        depthWrite: true,
+                        polygonOffset: true,
+                        polygonOffsetFactor: i + 1, // 增加偏移因子，确保与基础平面不发生冲突
+                        polygonOffsetUnits: 1
+                    });
+                    
+                    // 创建网格并添加到场景
+                    const contourMesh = new THREE.Mesh(contourGeometry, contourMaterial);
+                    
+                    // Z位置设置
+                    if (enableExtrusion) {
+                        // 确保最低层也有足够的Z偏移
+                        contourMesh.position.z = Math.max(0.005, i * layerGap);
+                    } else {
+                        // 平面模式下使用固定间隔
+                        contourMesh.position.z = 0.002 + i * 0.001;
+                    }
+                    
+                    contourMesh.renderOrder = i + 1; // 设置明确的渲染顺序
+                    scene.add(contourMesh);
+                    contourMeshes.push(contourMesh);
+                });
+            });
+        }
+        
+        // 初始创建等值线
+        createContours();
         
         // 添加光源
         const ambientLight = new THREE.AmbientLight(0xffffff, 0.6);
@@ -248,6 +295,12 @@
         // 添加坐标轴辅助
         const axesHelper = new THREE.AxesHelper(1);
         scene.add(axesHelper);
+        
+        // 挤压控制UI事件监听
+        document.getElementById('enableExtrusion').addEventListener('change', (event) => {
+            enableExtrusion = event.target.checked;
+            createContours(); // 重新创建等值线
+        });
         
         // 窗口大小调整处理
         window.addEventListener('resize', () => {
