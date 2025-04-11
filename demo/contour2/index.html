@@ -1,0 +1,364 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Three.js Contour Plot</title>
+    <style>
+        body { margin: 0; overflow: hidden; }
+        canvas { display: block; }
+    </style>
+</head>
+<body>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.132.2/build/three.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.132.2/examples/js/controls/OrbitControls.js"></script>
+
+    <script>
+        // Data provided
+        var data = [{
+            z: [[10, 10.625, 12.5, 15.625, 20],
+                [5.625, 6.25, 8.125, 11.25, 15.625],
+                [2.5, 3.125, 5., 8.125, 12.5],
+                [0.625, 1.25, 3.125, 6.25, 10.625],
+                [0, 0.625, 2.5, 5.625, 10]],
+            x: [-9, -6, -5, -3, -1],
+            y: [0, 1, 4, 5, 7],
+            type: 'contour'
+        }];
+
+        // Initialize Three.js scene, camera, and renderer
+        const scene = new THREE.Scene();
+        scene.background = new THREE.Color(0xffffff);
+        
+        // Set camera to match the target image
+        const camera = new THREE.PerspectiveCamera(40, window.innerWidth / window.innerHeight, 0.1, 1000);
+        camera.position.set(-5, -12, 8); // Matches the target perspective
+        camera.up.set(0, 0, 1);
+        camera.lookAt(-5, 0, 0);
+
+        const renderer = new THREE.WebGLRenderer({ antialias: true });
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        document.body.appendChild(renderer.domElement);
+
+        // Add orbit controls
+        const controls = new THREE.OrbitControls(camera, renderer.domElement);
+        controls.enableDamping = true;
+        controls.dampingFactor = 0.25;
+        controls.rotateSpeed = 0.7;
+        controls.zoomSpeed = 1.2;
+
+        // Improved color mapping function
+        function getColorForValue(value, min, max) {
+            // Enhanced color scale with more intermediate steps for smoother transitions
+            const colorStops = [
+                { value: 0, color: new THREE.Color(0x000088) },     // deep blue
+                { value: 2, color: new THREE.Color(0x0000cc) },     // dark blue
+                { value: 4, color: new THREE.Color(0x0033ff) },     // medium blue
+                { value: 6, color: new THREE.Color(0x3366ff) },     // blue
+                { value: 8, color: new THREE.Color(0x6699ff) },     // light blue
+                { value: 10, color: new THREE.Color(0x99ccff) },    // pale blue
+                { value: 12, color: new THREE.Color(0xccddff) },    // very pale blue
+                { value: 14, color: new THREE.Color(0xffcccc) },    // very pale red
+                { value: 16, color: new THREE.Color(0xff9999) },    // pale red
+                { value: 18, color: new THREE.Color(0xff5555) },    // light red
+                { value: 20, color: new THREE.Color(0xff0000) }     // bright red
+            ];
+
+            // Find appropriate color stops
+            let lowerStop = colorStops[0];
+            let upperStop = colorStops[colorStops.length - 1];
+            
+            for (let i = 0; i < colorStops.length - 1; i++) {
+                if (value >= colorStops[i].value && value <= colorStops[i + 1].value) {
+                    lowerStop = colorStops[i];
+                    upperStop = colorStops[i + 1];
+                    break;
+                }
+            }
+            
+            // Interpolate color with a smoother transition
+            const t = (value - lowerStop.value) / (upperStop.value - lowerStop.value);
+            const color = new THREE.Color();
+            color.r = lowerStop.color.r + (upperStop.color.r - lowerStop.color.r) * t;
+            color.g = lowerStop.color.g + (upperStop.color.g - lowerStop.color.g) * t;
+            color.b = lowerStop.color.b + (upperStop.color.b - lowerStop.color.b) * t;
+            
+            return color;
+        }
+
+        // Function to create a smoother surface
+        function createContourSurface(data) {
+            const contourData = data[0];
+            const xValues = contourData.x;
+            const yValues = contourData.y;
+            const zValues = contourData.z;
+            
+            // Determine min and max for color mapping
+            let minZ = Number.POSITIVE_INFINITY;
+            let maxZ = Number.NEGATIVE_INFINITY;
+            
+            for (let i = 0; i < zValues.length; i++) {
+                for (let j = 0; j < zValues[i].length; j++) {
+                    minZ = Math.min(minZ, zValues[i][j]);
+                    maxZ = Math.max(maxZ, zValues[i][j]);
+                }
+            }
+            
+            // Create geometry
+            const geometry = new THREE.BufferGeometry();
+            const vertices = [];
+            const colors = [];
+            const indices = [];
+            
+            // Create vertices with colors based on z-values
+            for (let i = 0; i < yValues.length; i++) {
+                for (let j = 0; j < xValues.length; j++) {
+                    const x = xValues[j];
+                    const y = yValues[i];
+                    const z = zValues[i][j] * 0.13; // Adjusted scale
+                    
+                    vertices.push(x, y, z);
+                    
+                    // Get color for this vertex
+                    const color = getColorForValue(zValues[i][j], minZ, maxZ);
+                    colors.push(color.r, color.g, color.b);
+                }
+            }
+            
+            // Create faces (indices)
+            for (let i = 0; i < yValues.length - 1; i++) {
+                for (let j = 0; j < xValues.length - 1; j++) {
+                    const a = i * xValues.length + j;
+                    const b = i * xValues.length + j + 1;
+                    const c = (i + 1) * xValues.length + j + 1;
+                    const d = (i + 1) * xValues.length + j;
+                    
+                    // Two triangles per grid cell
+                    indices.push(a, b, d);
+                    indices.push(b, c, d);
+                }
+            }
+            
+            // Set up buffer attributes
+            geometry.setIndex(indices);
+            geometry.setAttribute('position', new THREE.Float32BufferAttribute(vertices, 3));
+            geometry.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
+            
+            // Generate normals for smooth shading
+            geometry.computeVertexNormals();
+            
+            // Create material
+            const material = new THREE.MeshPhongMaterial({
+                vertexColors: true,
+                side: THREE.DoubleSide,
+                shininess: 10, // More matte appearance
+                flatShading: false
+            });
+            
+            const mesh = new THREE.Mesh(geometry, material);
+            scene.add(mesh);
+            
+            // Add contour lines
+            addImprovedContourLines(xValues, yValues, zValues);
+        }
+
+        // 改进后的等高线生成函数
+        function addImprovedContourLines(xValues, yValues, zValues) {
+            // Set contour line levels
+            const contourLevels = [2, 4, 6, 8, 10, 12, 14, 16, 18];
+            
+            for (let level of contourLevels) {
+                // 存储所有找到的线段
+                const segments = [];
+                
+                // 处理内部网格单元
+                for (let i = 0; i < yValues.length - 1; i++) {
+                    for (let j = 0; j < xValues.length - 1; j++) {
+                        const x0 = xValues[j];
+                        const x1 = xValues[j + 1];
+                        const y0 = yValues[i];
+                        const y1 = yValues[i + 1];
+                        
+                        const z00 = zValues[i][j];
+                        const z10 = zValues[i][j + 1];
+                        const z01 = zValues[i + 1][j];
+                        const z11 = zValues[i + 1][j + 1];
+                        
+                        // 存储当前单元格的交点
+                        const intersections = [];
+                        
+                        // 检查四条边的交点
+                        // 底边
+                        if ((z00 < level && z10 >= level) || (z00 >= level && z10 < level)) {
+                            const t = (level - z00) / (z10 - z00);
+                            intersections.push(new THREE.Vector3(
+                                x0 + t * (x1 - x0),
+                                y0,
+                                level * 0.13
+                            ));
+                        }
+                        
+                        // 右边
+                        if ((z10 < level && z11 >= level) || (z10 >= level && z11 < level)) {
+                            const t = (level - z10) / (z11 - z10);
+                            intersections.push(new THREE.Vector3(
+                                x1,
+                                y0 + t * (y1 - y0),
+                                level * 0.13
+                            ));
+                        }
+                        
+                        // 顶边
+                        if ((z01 < level && z11 >= level) || (z01 >= level && z11 < level)) {
+                            const t = (level - z01) / (z11 - z01);
+                            intersections.push(new THREE.Vector3(
+                                x0 + t * (x1 - x0),
+                                y1,
+                                level * 0.13
+                            ));
+                        }
+                        
+                        // 左边
+                        if ((z00 < level && z01 >= level) || (z00 >= level && z01 < level)) {
+                            const t = (level - z00) / (z01 - z00);
+                            intersections.push(new THREE.Vector3(
+                                x0,
+                                y0 + t * (y1 - y0),
+                                level * 0.13
+                            ));
+                        }
+                        
+                        // 如果找到两个交点，创建一个线段
+                        if (intersections.length === 2) {
+                            segments.push({
+                                start: intersections[0],
+                                end: intersections[1]
+                            });
+                        }
+                    }
+                }
+                
+                // 连接线段形成连续的等高线
+                const connectedLines = connectSegments(segments);
+                
+                // 创建等高线材质
+                const lineMaterial = new THREE.LineBasicMaterial({
+                    color: 0x000000,
+                    linewidth: 1,
+                    opacity: 0.8,
+                    transparent: false
+                });
+                
+                // 为每条连续的等高线创建一个单独的几何体
+                for (const line of connectedLines) {
+                    const points = line;
+                    if (points.length >= 2) {
+                        const geometry = new THREE.BufferGeometry().setFromPoints(points);
+                        const contourLine = new THREE.Line(geometry, lineMaterial);
+                        scene.add(contourLine);
+                    }
+                }
+            }
+        }
+
+        // 新增：连接线段形成连续的等高线
+        function connectSegments(segments) {
+            if (segments.length === 0) return [];
+            
+            const connectedLines = [];
+            const used = new Set();
+            
+            // 判断两点是否近似相等
+            function pointsEqual(p1, p2, epsilon = 0.0001) {
+                return Math.abs(p1.x - p2.x) < epsilon &&
+                       Math.abs(p1.y - p2.y) < epsilon &&
+                       Math.abs(p1.z - p2.z) < epsilon;
+            }
+            
+            // 寻找与给定点相连的线段
+            function findConnectedSegment(point, currentSegmentIndex) {
+                for (let i = 0; i < segments.length; i++) {
+                    if (i === currentSegmentIndex || used.has(i)) continue;
+                    
+                    const segment = segments[i];
+                    if (pointsEqual(point, segment.start)) {
+                        used.add(i);
+                        return { segment, isStart: true };
+                    }
+                    if (pointsEqual(point, segment.end)) {
+                        used.add(i);
+                        return { segment, isStart: false };
+                    }
+                }
+                return null;
+            }
+            
+            // 从每个未使用的线段开始尝试构建连续线
+            while (used.size < segments.length) {
+                let startSegmentIndex = 0;
+                while (startSegmentIndex < segments.length && used.has(startSegmentIndex)) {
+                    startSegmentIndex++;
+                }
+                if (startSegmentIndex >= segments.length) break;
+                
+                const currentLine = [];
+                let currentSegment = segments[startSegmentIndex];
+                used.add(startSegmentIndex);
+                
+                // 向一个方向延伸
+                currentLine.push(currentSegment.start);
+                currentLine.push(currentSegment.end);
+                
+                // 向后延伸
+                let connection = findConnectedSegment(currentSegment.start, startSegmentIndex);
+                while (connection) {
+                    const { segment, isStart } = connection;
+                    const point = isStart ? segment.end : segment.start;
+                    currentLine.unshift(point);
+                    connection = findConnectedSegment(point, -1);
+                }
+                
+                // 向前延伸
+                connection = findConnectedSegment(currentSegment.end, startSegmentIndex);
+                while (connection) {
+                    const { segment, isStart } = connection;
+                    const point = isStart ? segment.end : segment.start;
+                    currentLine.push(point);
+                    connection = findConnectedSegment(point, -1);
+                }
+                
+                connectedLines.push(currentLine);
+            }
+            
+            return connectedLines;
+        }
+
+        // Create the contour surface
+        createContourSurface(data);
+
+        // Enhanced lighting for better color rendering
+        const ambientLight = new THREE.AmbientLight(0xffffff, 0.8);
+        scene.add(ambientLight);
+
+        const directionalLight = new THREE.DirectionalLight(0xffffff, 0.4);
+        directionalLight.position.set(1, 1, 10);
+        scene.add(directionalLight);
+
+        // Animation loop
+        function animate() {
+            requestAnimationFrame(animate);
+            controls.update();
+            renderer.render(scene, camera);
+        }
+        
+        animate();
+
+        // Handle window resize
+        window.addEventListener('resize', () => {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        });
+    </script>
+</body>
+</html> 

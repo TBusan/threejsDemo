@@ -1,0 +1,78 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+	<head>
+		<meta charset="UTF-8" />
+		<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+		<title>Three.js 自定义着色器示例</title>
+		<style>
+			body {
+				margin: 0;
+				overflow: hidden;
+			}
+			canvas {
+				display: block;
+			}
+			#info {
+				position: absolute;
+				top: 10px;
+				width: 100%;
+				text-align: center;
+				color: white;
+				font-family: Arial, sans-serif;
+				pointer-events: none;
+			}
+		</style>
+	</head>
+	<body>
+		<!-- 生成渐变纹理的HTML代码 -->
+	
+
+		<canvas id="maskCanvas" width="4096" height="4096"></canvas>
+		<script>
+		function createNoise(seed) {
+			// 简化版噪声生成函数
+			return function(x, y) {
+				return Math.sin(x * 12.9898 + y * 78.233 + seed) * 43758.5453 % 1;
+			};
+		}
+		
+		const canvas = document.getElementById('maskCanvas');
+		const ctx = canvas.getContext('2d');
+		const imageData = ctx.createImageData(4096, 4096);
+		const data = imageData.data;
+		
+		// 创建不同噪声实例
+		const roadNoise = createNoise(123);
+		const sandNoise = createNoise(456);
+		
+		for(let y = 0; y < 4096; y++) {
+			for(let x = 0; x < 4096; x++) {
+				const i = (y * 4096 + x) * 4;
+				
+				// R通道：道路噪声
+				data[i] = roadNoise(x/500, y/500) * 255;
+				
+				// G通道：沙地渐变
+				const sand = 0.5 + 0.5 * sandNoise(x/800, y/800);
+				data[i+1] = sand * 255;
+				
+				// B通道：路径曲线
+				data[i+2] = Math.sin(x/200) * 127 + 128;
+				
+				// A通道：桥梁结构
+				data[i+3] = (Math.abs(x - y) < 50) ? 255 : 0;
+			}
+		}
+		
+		ctx.putImageData(imageData, 0, 0);
+		
+		// 导出PNG
+		canvas.toBlob(blob => {
+			const link = document.createElement('a');
+			link.download = 'terrainMasks.png';
+			link.href = URL.createObjectURL(blob);
+			link.click();
+		});
+		</script>
+	</body>
+</html>

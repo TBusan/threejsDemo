@@ -1,0 +1,216 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+	<head>
+		<meta charset="UTF-8" />
+		<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+		<title>Three.js 自定义着色器示例</title>
+		<style>
+			body {
+				margin: 0;
+				overflow: hidden;
+			}
+			canvas {
+				display: block;
+			}
+			#info {
+				position: absolute;
+				top: 10px;
+				width: 100%;
+				text-align: center;
+				color: white;
+				font-family: Arial, sans-serif;
+				pointer-events: none;
+			}
+		</style>
+	</head>
+	<body>
+		<div id="info">Three.js 自定义着色器示例</div>
+		<script type="importmap">
+			{
+				"imports": {
+					"three": "../../../build/three.module.js",
+					"three/addons/": "../../../examples/jsm/"
+				}
+			}
+		</script>
+		<script type="module">
+			import * as THREE from "three";
+			import { OrbitControls } from "three/addons/controls/OrbitControls.js";
+
+			// 创建场景
+			const scene = new THREE.Scene();
+			const camera = new THREE.PerspectiveCamera(
+				75,
+				window.innerWidth / window.innerHeight,
+				0.1,
+				1000
+			);
+			const renderer = new THREE.WebGLRenderer({ antialias: true });
+			renderer.setSize(window.innerWidth, window.innerHeight);
+			renderer.shadowMap.enabled = true;
+			document.body.appendChild(renderer.domElement);
+
+			// 添加相机控制器
+			const controls = new OrbitControls(camera, renderer.domElement);
+			camera.position.set(0, 5, 10);
+			controls.update();
+
+			// 添加光源
+			const directionalLight = new THREE.DirectionalLight(0xffffff, 1);
+			directionalLight.position.set(5, 10, 5);
+			directionalLight.castShadow = true;
+			scene.add(directionalLight);
+
+			const ambientLight = new THREE.AmbientLight(0x404040);
+			scene.add(ambientLight);
+
+			// 添加一个简单的地面
+			const groundGeometry = new THREE.PlaneGeometry(20, 20);
+			const groundMaterial = new THREE.MeshStandardMaterial({
+				color: 0x556b2f,
+			});
+			const ground = new THREE.Mesh(groundGeometry, groundMaterial);
+			ground.rotation.x = -Math.PI / 2;
+			ground.receiveShadow = true;
+			scene.add(ground);
+
+			// 自定义着色器材质 - 使用更简单的版本避免与Three.js 0.169版本的冲突
+			const vertexShader = `
+  uniform float time;
+  varying vec2 vUv;
+  varying vec3 vPosition;
+  varying vec3 vNormal;
+  varying vec3 vWorldPosition;
+  
+  void main() {
+    vUv = uv;
+    vPosition = position;
+    vNormal = normalMatrix * normal;
+    
+    // 简单的顶点波动
+    vec3 pos = position;
+    float displacement = sin(position.x * 2.0 + time) * 0.1;
+    displacement += sin(position.y * 2.0 + time) * 0.1;
+    pos.y += displacement;
+    
+    vec4 worldPosition = modelMatrix * vec4(pos, 1.0);
+    vWorldPosition = worldPosition.xyz;
+    
+    gl_Position = projectionMatrix * modelViewMatrix * vec4(pos, 1.0);
+  }
+`;
+
+			const fragmentShader = `
+  uniform float time;
+  uniform vec3 color;
+  varying vec2 vUv;
+  varying vec3 vPosition;
+  varying vec3 vNormal;
+  varying vec3 vWorldPosition;
+  
+  void main() {
+    // 基本的颜色变化
+    vec3 light = normalize(vec3(1.0, 1.0, 1.0));
+    float diff = max(0.0, dot(normalize(vNormal), light));
+    
+    // 添加一些波动效果
+    float wave = sin(vWorldPosition.x * 2.0 + time * 2.0) * 0.5 + 0.5;
+    vec3 finalColor = color * diff * (0.8 + wave * 0.2);
+    
+    // 添加简单的边缘效果
+    float fresnel = pow(1.0 - abs(dot(normalize(vNormal), vec3(0.0, 0.0, 1.0))), 2.0);
+    finalColor += vec3(0.1, 0.3, 0.5) * fresnel;
+    
+    // 添加简单的雾效果
+    float depth = length(vWorldPosition) * 0.1;
+    vec3 fogColor = vec3(0.5, 0.6, 0.7);
+    finalColor = mix(finalColor, fogColor, smoothstep(5.0, 15.0, depth));
+    
+    gl_FragColor = vec4(finalColor, 1.0);
+  }
+`;
+
+			const customMaterial = new THREE.ShaderMaterial({
+				uniforms: {
+					time: { value: 0 },
+					color: { value: new THREE.Color(0x80ee80) },
+				},
+				vertexShader: vertexShader,
+				fragmentShader: fragmentShader,
+			});
+
+			// 创建几个使用自定义着色器的对象
+			function createCustomObject(x, y, z) {
+				const geometry = new THREE.SphereGeometry(1, 32, 32);
+				const mesh = new THREE.Mesh(geometry, customMaterial);
+				mesh.position.set(x, y, z);
+				mesh.castShadow = true;
+				mesh.receiveShadow = true;
+				scene.add(mesh);
+				return mesh;
+			}
+
+			const objects = [
+				createCustomObject(-3, 1, 0),
+				createCustomObject(0, 1, 0),
+				createCustomObject(3, 1, 0),
+			];
+
+			// 添加一些额外的对象
+			function addExtraObjects() {
+				// 添加树木
+				const treeGeometry = new THREE.CylinderGeometry(0, 0.5, 2, 4);
+				const treeMaterial = new THREE.MeshStandardMaterial({
+					color: 0x228b22,
+				});
+
+				for (let i = 0; i < 10; i++) {
+					const tree = new THREE.Mesh(treeGeometry, treeMaterial);
+					const x = Math.random() * 16 - 8;
+					const z = Math.random() * 16 - 8;
+					tree.position.set(x, 1, z);
+					tree.castShadow = true;
+					tree.receiveShadow = true;
+					scene.add(tree);
+				}
+
+				// 添加一个简单的天空盒
+				const skyGeometry = new THREE.BoxGeometry(100, 100, 100);
+				const skyMaterial = new THREE.MeshBasicMaterial({
+					color: 0x87ceeb,
+					side: THREE.BackSide,
+				});
+				const sky = new THREE.Mesh(skyGeometry, skyMaterial);
+				scene.add(sky);
+			}
+
+			addExtraObjects();
+
+			// 渲染循环
+			function animate() {
+				requestAnimationFrame(animate);
+
+				// 更新uniform变量
+				const time = performance.now() * 0.001;
+				customMaterial.uniforms.time.value = time;
+
+				// 使对象旋转
+				objects.forEach((obj, index) => {
+					obj.rotation.y = time * (0.2 + index * 0.1);
+				});
+
+				renderer.render(scene, camera);
+			}
+
+			// 处理窗口大小变化
+			window.addEventListener("resize", () => {
+				camera.aspect = window.innerWidth / window.innerHeight;
+				camera.updateProjectionMatrix();
+				renderer.setSize(window.innerWidth, window.innerHeight);
+			});
+
+			// 启动渲染循环
+			animate();
+		</script>
+	</body>
+</html>

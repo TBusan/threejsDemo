@@ -1,0 +1,105 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+	<head>
+		<meta charset="UTF-8" />
+		<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+		<title>Three.js 自定义着色器示例</title>
+		<style>
+			body {
+				margin: 0;
+				overflow: hidden;
+			}
+			canvas {
+				display: block;
+			}
+			#info {
+				position: absolute;
+				top: 10px;
+				width: 100%;
+				text-align: center;
+				color: white;
+				font-family: Arial, sans-serif;
+				pointer-events: none;
+			}
+		</style>
+	</head>
+	<body>
+		<!-- 生成渐变纹理的HTML代码 -->
+	
+<!-- 云层纹理生成器 -->
+<canvas id="cloudCanvas" width="1024" height="1024"></canvas>
+<script>
+function generateClouds() {
+    const canvas = document.getElementById('cloudCanvas');
+    const ctx = canvas.getContext('2d');
+    
+    // 创建渐变基础
+    const gradient = ctx.createLinearGradient(0, 0, 1024, 1024);
+    gradient.addColorStop(0, 'rgba(255,255,255,0.1)');
+    gradient.addColorStop(1, 'rgba(255,255,255,0.9)');
+    
+    // 生成噪声基底
+    ctx.fillStyle = gradient;
+    ctx.fillRect(0, 0, 1024, 1024);
+    
+    // 添加分形噪声细节
+    const imageData = ctx.getImageData(0, 0, 1024, 1024);
+    const data = imageData.data;
+    
+    for(let i=0; i<data.length; i+=4) {
+        const x = (i/4) % 1024;
+        const y = Math.floor((i/4) / 1024);
+        
+        // 使用多倍频噪声
+        let noise = 0;
+        noise += perlin(x/300, y/300) * 0.4;
+        noise += perlin(x/150, y/150) * 0.3;
+        noise += perlin(x/50,  y/50)  * 0.3;
+        
+        const alpha = Math.min(255, noise * 200 + 55);
+        data[i+3] = alpha; // 仅保留Alpha通道
+    }
+    
+    ctx.putImageData(imageData, 0, 0);
+    
+    // 导出为JPG
+    canvas.toBlob(blob => {
+        const link = document.createElement('a');
+        link.download = 'clouds.jpg';
+        link.href = URL.createObjectURL(blob);
+        link.click();
+    });
+}
+
+// 简化版柏林噪声生成器
+function perlin(x, y) {
+    const X = Math.floor(x) & 255;
+    const Y = Math.floor(y) & 255;
+    x -= Math.floor(x);
+    y -= Math.floor(y);
+    
+    const u = fade(x);
+    const v = fade(y);
+    
+    const a = grad(X,   Y,   x,   y);  
+    const b = grad(X+1, Y,   x-1, y);
+    const c = grad(X,   Y+1, x,   y-1);
+    const d = grad(X+1, Y+1, x-1, y-1);
+    
+    return lerp(v, lerp(u, a, b), lerp(u, c, d));
+}
+
+function fade(t) { return t * t * t * (t * (t * 6 - 15) + 10); }
+function lerp(t, a, b) { return a + t * (b - a); }
+function grad(hash, x, y) {
+    const h = hash & 15;
+    const u = h<8 ? x : y;
+    const v = h<4 ? y : h==12||h==14 ? x : 0;
+    return ((h&1) == 0 ? u : -u) + ((h&2) == 0 ? v : -v);
+}
+
+// 生成纹理
+generateClouds();
+</script>
+	</body>
+</html>

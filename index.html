@@ -1,0 +1,1123 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Three.js Contour Plot</title>
+    <style>
+        body { margin: 0; overflow: hidden; }
+        canvas { display: block; }
+    </style>
+</head>
+<body>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.132.2/build/three.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.132.2/examples/js/controls/OrbitControls.js"></script>
+
+    <script>
+        // Data provided
+        var data = [{
+            // v: [[10, 10.625, 12.5, 15.625, 20],
+            //     [5.625, 6.25, 8.125, 11.25, 15.625],
+            //     [2.5, 3.125, 5., 8.125, 12.5],
+            //     [0.625, 1.25, 3.125, 6.25, 10.625],
+            //     [0, 0.625, 2.5, 5.625, 10]],
+            // x: [-9, -6, -5, -3, -1],
+            // y: [0, 1, 4, 5, 7],
+
+
+            v: [[2, 4, 7, 12, 13, 14, 15, 16],
+   [3, 1, 6, 11, 12, 13, 16, 17],
+   [4, 2, 7, 7, 11, 14, 17, 18],
+   [5, 3, 8, 8, 13, 15, 18, 19],
+   [7, 4, 10, 9, 16, 18, 20, 19],
+   [9, 10, 5, 27, 23, 21, 21, 21],
+   [11, 14, 17, 26, 25, 24, 23, 22]],
+   x: [0, 2, 4, 6, 8,10],
+   y: [0, 1, 2, 3, 4,5],
+
+
+//    v: [[null, null, null, 12, 13, 14, 15, 16],
+//       [null, 1, null, 11, null, null, null, 17],
+//       [null, 2, 6, 7, null, null, null, 18],
+//       [null, 3, null, 8, null, null, null, 19],
+//       [5, 4, 10, 9, null, null, null, 20],
+//       [null, null, null, 27, null, null, null, 21],
+//       [null, null, null, 26, 25, 24, 23, 22]],
+
+//       x: [0, 2, 4, 6, 8,10,12,14],
+//       y: [0, 1, 2, 3, 4,5,6,7],
+
+            type: 'contour'
+        }];
+
+        // Initialize Three.js scene, camera, and renderer
+        const scene = new THREE.Scene();
+        scene.background = new THREE.Color(0xffffff);
+        
+        // Set camera to match the target image
+        const camera = new THREE.PerspectiveCamera(40, window.innerWidth / window.innerHeight, 0.1, 1000);
+        camera.position.set(-5, -12, 8); // Matches the target perspective
+        camera.up.set(0, 0, 1);
+        camera.lookAt(-5, 0, 0);
+
+        const renderer = new THREE.WebGLRenderer({ 
+            antialias: true,
+            alpha: true,
+            preserveDrawingBuffer: true,
+            powerPreference: 'high-performance',
+            logarithmicDepthBuffer: true
+        });
+        renderer.setPixelRatio(window.devicePixelRatio > 1 ? window.devicePixelRatio * 1.5 : 3);
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        document.body.appendChild(renderer.domElement);
+
+        // Add orbit controls
+        const controls = new THREE.OrbitControls(camera, renderer.domElement);
+        controls.enableDamping = true;
+        controls.dampingFactor = 0.25;
+        controls.rotateSpeed = 0.7;
+        controls.zoomSpeed = 1.2;
+
+        // Define unified Z-axis layer management system - global variable
+        const zLayers = {
+            background: -0.05,      // Bottom background
+            backgroundFill: -0.01,  // Background fill
+            polygonFill: 0.005,     // Polygon fill
+            wideLine: 0.015,        // Wide line underlayer
+            contourLine: 0.02       // Main contour line
+        };
+
+        // Clear existing scene and replace with texture-based method
+        function createContourSurface(data) {
+            const contourData = data[0];
+            const xValues = contourData.x;
+            const yValues = contourData.y;
+            const vValues = contourData.v;
+            
+            // Get display settings, default to true if undefined
+            const showLines = true; // Enable contour lines display
+            const showFill = contourData.showFill !== undefined ? contourData.showFill : true;
+            
+            // Clear scene
+            while(scene.children.length > 0) { 
+                scene.remove(scene.children[0]); 
+            }
+            
+            // Define contour levels - extract as a variable for use in multiple places
+            const contourLevels = [0, 2, 4, 6, 8, 10, 12, 14, 16, 18, 20];
+            
+            // Calculate data range
+            let minVal = Infinity;
+            let maxVal = -Infinity;
+            for (let i = 0; i < vValues.length; i++) {
+                for (let j = 0; j < vValues[i].length; j++) {
+                    if (vValues[i][j] !== null) {
+                        minVal = Math.min(minVal, vValues[i][j]);
+                        maxVal = Math.max(maxVal, vValues[i][j]);
+                    }
+                }
+            }
+            
+            // Calculate actual dimensions of the data plane
+            const minX = xValues[0];
+            const maxX = xValues[xValues.length - 1];
+            const minY = yValues[0];
+            const maxY = yValues[yValues.length - 1];
+            const width = maxX - minX;
+            const height = maxY - minY;
+            
+            // Only create texture and fill when showFill is true
+            if (showFill) {
+                // Increase texture resolution for better edge quality
+                const textureSize = 2048; // Increase from 1024 to 2048
+                const data_texture = new Uint8Array(4 * textureSize * textureSize);
+                
+                // Precalculate variables needed for boundary anti-aliasing
+                const contourLineFadeWidth = 2.0; // Width of boundary anti-aliasing in pixels
+                const fadeDistance = contourLineFadeWidth / textureSize;
+                
+                // Calculate interpolation function to get value at any position
+                function getValueAt(x, y) {
+                    // Return null directly for points outside data boundaries
+                    if (x < minX || x > maxX || y < minY || y > maxY) {
+                        return null;
+                    }
+                    
+                    // Find indices - modify index calculation for more reliable boundary handling
+                    let xIndex = 0;
+                    let xFound = false;
+                    for (let i = 0; i < xValues.length - 1; i++) {
+                        if (x >= xValues[i] && x <= xValues[i+1]) {
+                            xIndex = i;
+                            xFound = true;
+                            break;
+                        }
+                    }
+                    
+                    let yIndex = 0;
+                    let yFound = false;
+                    for (let i = 0; i < yValues.length - 1; i++) {
+                        if (y >= yValues[i] && y <= yValues[i+1]) {
+                            yIndex = i;
+                            yFound = true;
+                            break;
+                        }
+                    }
+                    
+                    // If index not found, might be out of bounds, use closest boundary point
+                    if (!xFound) {
+                        xIndex = (x < xValues[0]) ? 0 : xValues.length - 2;
+                    }
+                    
+                    if (!yFound) {
+                        yIndex = (y < yValues[0]) ? 0 : yValues.length - 2;
+                    }
+                    
+                    // Ensure indices are within valid range
+                    xIndex = Math.max(0, Math.min(xIndex, xValues.length - 2));
+                    yIndex = Math.max(0, Math.min(yIndex, yValues.length - 2));
+                    
+                    // Get neighboring indices
+                    const xIndexNext = Math.min(xIndex + 1, xValues.length - 1);
+                    const yIndexNext = Math.min(yIndex + 1, yValues.length - 1);
+                    
+                    // Safety check - ensure array elements exist
+                    if (!vValues[yIndex] || !vValues[yIndexNext]) {
+                        return null;
+                    }
+                    
+                    // Values at the four corners - now safe because we've checked if arrays exist
+                    const v00 = vValues[yIndex][xIndex];
+                    const v10 = vValues[yIndex][xIndexNext];
+                    const v01 = vValues[yIndexNext][xIndex];
+                    const v11 = vValues[yIndexNext][xIndexNext];
+                    
+                    // Check for null values
+                    if (v00 === null || v10 === null || v01 === null || v11 === null) {
+                        // Use average of non-null values
+                        const validValues = [v00, v10, v01, v11].filter(v => v !== null);
+                        if (validValues.length === 0) {
+                            return null; // If all values are null, return null
+                        }
+                        return validValues.reduce((sum, v) => sum + v, 0) / validValues.length;
+                    }
+                    
+                    // Calculate interpolation weights
+                    const x1 = xValues[xIndex];
+                    const x2 = xValues[xIndexNext];
+                    const y1 = yValues[yIndex];
+                    const y2 = yValues[yIndexNext];
+                    
+                    // Prevent division by zero
+                    if (x1 === x2 || y1 === y2) {
+                        return (v00 + v10 + v01 + v11) / 4;
+                    }
+                    
+                    // Calculate bilinear interpolation ratios
+                    const xRatio = (x - x1) / (x2 - x1);
+                    const yRatio = (y - y1) / (y2 - y1);
+                    
+                    // Bilinear interpolation
+                    const vTop = v00 * (1 - xRatio) + v10 * xRatio;
+                    const vBottom = v01 * (1 - xRatio) + v11 * xRatio;
+                    return vTop * (1 - yRatio) + vBottom * yRatio;
+                }
+                
+                // Improved discrete color calculation with edge anti-aliasing support
+                function getDiscreteColorForValue(value, x, y) {
+                    // Handle null values
+                    if (value === null) {
+                        return { r: 1, g: 1, b: 1, a: 0 }; // White semi-transparent
+                    }
+                    
+                    // Ensure value is in valid range
+                    value = Math.max(contourLevels[0], Math.min(contourLevels[contourLevels.length - 1], value));
+                    
+                    // Find which interval the value falls into
+                    for (let i = 0; i < contourLevels.length - 1; i++) {
+                        const lowerBound = contourLevels[i];
+                        const upperBound = contourLevels[i + 1];
+                        
+                        if (value >= lowerBound && value < upperBound) {
+                            // Check if we're close to a contour line boundary
+                            const distanceToLower = Math.abs(value - lowerBound);
+                            const distanceToUpper = Math.abs(value - upperBound);
+                            
+                            // Safely calculate gradient - avoid issues caused by recursive calls
+                            let gradientMagnitude = 1.0; // Default gradient value
+                            
+                            // Only calculate gradient when not at edge points
+                            if (x > minX + width * 0.01 && x < maxX - width * 0.01 && 
+                                y > minY + height * 0.01 && y < maxY - height * 0.01) {
+                                
+                                // Calculate safe sampling distance
+                                const dx = Math.min((maxX - minX) / textureSize, (maxX - minX) * 0.01);
+                                const dy = Math.min((maxY - minY) / textureSize, (maxY - minY) * 0.01);
+                                
+                                // Directly compute differences instead of recursively calling getValueAt
+                                // Compare current point value with surrounding points
+                                const centerVal = value;
+                                
+                                // One-way gradient sampling to avoid multiple recursion
+                                let rightVal = centerVal;
+                                let leftVal = centerVal;
+                                let upVal = centerVal;
+                                let downVal = centerVal;
+                                
+                                // Sample right point (if in range)
+                                if (x + dx < maxX) {
+                                    const xRightIndex = Math.min(Math.floor((x + dx - minX) / (maxX - minX) * (xValues.length - 1)), xValues.length - 2);
+                                    const yRightIndex = Math.min(Math.floor((y - minY) / (maxY - minY) * (yValues.length - 1)), yValues.length - 2);
+                                    if (xRightIndex >= 0 && yRightIndex >= 0 && 
+                                        vValues[yRightIndex] && vValues[yRightIndex][xRightIndex] !== null) {
+                                        rightVal = vValues[yRightIndex][xRightIndex];
+                                    }
+                                }
+                                
+                                // Sample left point (if in range)
+                                if (x - dx > minX) {
+                                    const xLeftIndex = Math.min(Math.floor((x - dx - minX) / (maxX - minX) * (xValues.length - 1)), xValues.length - 2);
+                                    const yLeftIndex = Math.min(Math.floor((y - minY) / (maxY - minY) * (yValues.length - 1)), yValues.length - 2);
+                                    if (xLeftIndex >= 0 && yLeftIndex >= 0 && 
+                                        vValues[yLeftIndex] && vValues[yLeftIndex][xLeftIndex] !== null) {
+                                        leftVal = vValues[yLeftIndex][xLeftIndex];
+                                    }
+                                }
+                                
+                                // Calculate gradient magnitude (using obtained values)
+                                const gradientX = (rightVal - leftVal) / (2 * dx);
+                                const gradientY = 0; // Simplify calculation, use only X direction gradient
+                                gradientMagnitude = Math.abs(gradientX) + Math.abs(gradientY);
+                                gradientMagnitude = Math.max(0.1, Math.min(2.0, gradientMagnitude)); // Limit gradient range
+                            }
+                            
+                            // Calculate color blend ratio - using gradient information
+                            const fadeDistance = 0.001; // Fixed transition width
+                            
+                            if (distanceToLower < fadeDistance * gradientMagnitude) {
+                                // Near lower boundary - blend current interval with lower interval color
+                                const lowerColor = getColorForValue(lowerBound);
+                                const currentColor = getColorForValue(lowerBound);
+                                const t = Math.max(0, distanceToLower / (fadeDistance * gradientMagnitude));
+                                return lerpColors(lowerColor, currentColor, t);
+                            } 
+                            else if (distanceToUpper < fadeDistance * gradientMagnitude) {
+                                // Near upper boundary - blend current interval with upper interval color
+                                const currentColor = getColorForValue(lowerBound);
+                                const upperColor = getColorForValue(upperBound);
+                                const t = Math.max(0, distanceToUpper / (fadeDistance * gradientMagnitude));
+                                return lerpColors(currentColor, upperColor, t);
+                            }
+                            
+                            // If not near a boundary, use the fixed color for this interval
+                            return getColorForValue(lowerBound);
+                        }
+                    }
+                    
+                    // If it's beyond the highest value, use the highest interval color
+                    return getColorForValue(contourLevels[contourLevels.length - 2]);
+                }
+                
+                // Color interpolation function
+                function lerpColors(color1, color2, t) {
+                    return {
+                        r: color1.r * (1 - t) + color2.r * t,
+                        g: color1.g * (1 - t) + color2.g * t,
+                        b: color1.b * (1 - t) + color2.b * t
+                    };
+                }
+                
+                // Use progressive rendering - fill at low resolution first, then enhance details
+                const stages = [
+                    { size: 512, blur: true },
+                    { size: textureSize, blur: false }
+                ];
+                
+                let currentTexture = null;
+                
+                for (const stage of stages) {
+                    const stageSize = stage.size;
+                    const stageTexture = new Uint8Array(4 * stageSize * stageSize);
+                    
+                    // Fill the texture data array
+                    for (let y = 0; y < stageSize; y++) {
+                        const realY = minY + (maxY - minY) * (y / stageSize);
+                        
+                        for (let x = 0; x < stageSize; x++) {
+                            const realX = minX + (maxX - minX) * (x / stageSize);
+                            
+                            // Get interpolated value at this point
+                            const v = getValueAt(realX, realY);
+                            
+                            // Handle null values
+                            let color;
+                            if (v === null) {
+                                // Set transparent or special color for null value areas
+                                color = { r: 1, g: 1, b: 1, a: 0 }; // Semi-transparent white
+                            } else {
+                                // Use improved discrete color mapping
+                                color = getDiscreteColorForValue(v, realX, realY);
+                            }
+                            
+                            // Write color to texture array
+                            const index = (y * stageSize + x) * 4;
+                            stageTexture[index] = Math.floor(color.r * 255);     // R
+                            stageTexture[index + 1] = Math.floor(color.g * 255); // G
+                            stageTexture[index + 2] = Math.floor(color.b * 255); // B
+                            stageTexture[index + 3] = color.a !== undefined ? Math.floor(color.a * 255) : 255; // A
+                        }
+                    }
+                    
+                    // If blur is needed, apply a 3x3 gaussian blur
+                    if (stage.blur && stageSize > 2) {
+                        const blurred = new Uint8Array(4 * stageSize * stageSize);
+                        // Simple 3x3 gaussian blur
+                        const gaussKernel = [
+                            0.0625, 0.125, 0.0625,
+                            0.125, 0.25, 0.125,
+                            0.0625, 0.125, 0.0625
+                        ];
+                        
+                        for (let y = 1; y < stageSize - 1; y++) {
+                            for (let x = 1; x < stageSize - 1; x++) {
+                                const idx = (y * stageSize + x) * 4;
+                                let r = 0, g = 0, b = 0;
+                                
+                                // Apply gaussian kernel
+                                for (let ky = -1; ky <= 1; ky++) {
+                                    for (let kx = -1; kx <= 1; kx++) {
+                                        const kidx = ((y + ky) * stageSize + (x + kx)) * 4;
+                                        const weight = gaussKernel[(ky + 1) * 3 + (kx + 1)];
+                                        r += stageTexture[kidx] * weight;
+                                        g += stageTexture[kidx + 1] * weight;
+                                        b += stageTexture[kidx + 2] * weight;
+                                    }
+                                }
+                                
+                                blurred[idx] = Math.round(r);
+                                blurred[idx + 1] = Math.round(g);
+                                blurred[idx + 2] = Math.round(b);
+                                blurred[idx + 3] = 255;
+                            }
+                        }
+                        
+                        // Copy blur result back to original texture
+                        for (let i = 0; i < blurred.length; i++) {
+                            stageTexture[i] = blurred[i];
+                        }
+                    }
+                    
+                    currentTexture = stageTexture;
+                }
+                
+                // Copy final texture to data_texture
+                if (currentTexture.length === data_texture.length) {
+                    data_texture.set(currentTexture);
+                } else {
+                    // If sizes differ, perform bilinear interpolation
+                    const finalSize = textureSize;
+                    const sourceSize = Math.sqrt(currentTexture.length / 4);
+                    
+                    for (let y = 0; y < finalSize; y++) {
+                        for (let x = 0; x < finalSize; x++) {
+                            const fx = (x / finalSize) * sourceSize;
+                            const fy = (y / finalSize) * sourceSize;
+                            
+                            const ix = Math.floor(fx);
+                            const iy = Math.floor(fy);
+                            const ix1 = Math.min(ix + 1, sourceSize - 1);
+                            const iy1 = Math.min(iy + 1, sourceSize - 1);
+                            
+                            const wx = fx - ix;
+                            const wy = fy - iy;
+                            
+                            const idx00 = (iy * sourceSize + ix) * 4;
+                            const idx01 = (iy * sourceSize + ix1) * 4;
+                            const idx10 = (iy1 * sourceSize + ix) * 4;
+                            const idx11 = (iy1 * sourceSize + ix1) * 4;
+                            
+                            const destIdx = (y * finalSize + x) * 4;
+                            
+                            for (let c = 0; c < 3; c++) {
+                                const v00 = currentTexture[idx00 + c];
+                                const v01 = currentTexture[idx01 + c];
+                                const v10 = currentTexture[idx10 + c];
+                                const v11 = currentTexture[idx11 + c];
+                                
+                                const v0 = v00 * (1 - wx) + v01 * wx;
+                                const v1 = v10 * (1 - wx) + v11 * wx;
+                                const v = v0 * (1 - wy) + v1 * wy;
+                                
+                                data_texture[destIdx + c] = Math.round(v);
+                            }
+                            
+                            data_texture[destIdx + 3] = 255;
+                        }
+                    }
+                }
+                
+                // Create THREE.js texture with optimized settings
+                const texture = new THREE.DataTexture(
+                    data_texture,
+                    textureSize,
+                    textureSize,
+                    THREE.RGBAFormat,
+                    THREE.UnsignedByteType
+                );
+                texture.needsUpdate = true;
+                texture.anisotropy = renderer.capabilities.getMaxAnisotropy(); // Increase anisotropic filtering
+                texture.magFilter = THREE.LinearFilter;
+                texture.minFilter = THREE.LinearMipmapLinearFilter;
+                texture.generateMipmaps = true;
+                
+                // Create material using the texture
+                const material = new THREE.MeshBasicMaterial({
+                    map: texture,
+                    side: THREE.DoubleSide
+                });
+                
+                // Create plane geometry, matching data area size
+                const planeGeometry = new THREE.PlaneGeometry(width, height);
+                
+                // Create mesh and position at data center
+                const plane = new THREE.Mesh(planeGeometry, material);
+                plane.position.x = minX + width / 2;
+                plane.position.y = minY + height / 2;
+                plane.position.z = -0.01;
+                scene.add(plane);
+            } else {
+                // If not showing color fill, add a background plane with solid color (optional)
+                const planeGeometry = new THREE.PlaneGeometry(width, height);
+                const material = new THREE.MeshBasicMaterial({
+                    color: 0xffffff,
+                    side: THREE.DoubleSide
+                });
+                const plane = new THREE.Mesh(planeGeometry, material);
+                plane.position.x = minX + width / 2;
+                plane.position.y = minY + height / 2;
+                plane.position.z = -0.01;
+                scene.add(plane);
+            }
+            
+            // Add border - deep blue border enhances visual effect
+            const borderGeometry = new THREE.EdgesGeometry(new THREE.PlaneGeometry(width, height));
+            const borderMaterial = new THREE.LineBasicMaterial({ 
+                color: 0x000088,
+                linewidth: 2
+            });
+            const border = new THREE.LineSegments(borderGeometry, borderMaterial);
+            border.position.x = minX + width / 2;
+            border.position.y = minY + height / 2;
+            border.position.z = 0.01; // Slightly forward to ensure visibility
+            scene.add(border);
+            
+            // Only draw contour lines when showLines is true
+            if (showLines) {
+                // Add contour lines - use the same contourLevels array defined earlier
+                const displayLevels = contourLevels.slice(1, -1); // Skip the min and max values
+                
+                for (let level of displayLevels) {
+                    const segments = findContourSegments(xValues, yValues, vValues, level);
+                    const connectedLines = connectSegments(segments);
+                    
+                    for (const line of connectedLines) {
+                        if (line.length >= 2) {
+                            // Apply smoothing
+                            const smoothedLine = smoothLine(line, 0.2);
+                            
+                            // Create line geometry
+                            const geometry = new THREE.BufferGeometry().setFromPoints(
+                                smoothedLine.map(p => new THREE.Vector3(p.x, p.y, 0.02))
+                            );
+                            
+                            // Thicker outline line - change to red
+                            const material = new THREE.LineBasicMaterial({
+                                color: 0xFF0000,
+                                linewidth: 2,
+                                transparent: true,
+                                opacity: 0.7
+                            });
+                            
+                            const contourLine = new THREE.Line(geometry, material);
+                            scene.add(contourLine);
+                            
+                            // Wide line is already semi-transparent, further reduce opacity
+                            const wideGeometry = new THREE.BufferGeometry().setFromPoints(
+                                smoothedLine.map(p => new THREE.Vector3(p.x, p.y, 0.015))
+                            );
+                            
+                            const wideMaterial = new THREE.LineBasicMaterial({
+                                color: 0xFF0000,
+                                linewidth: 6,
+                                transparent: true,
+                                opacity: 0.3
+                            });
+                            
+                            const wideLine = new THREE.Line(wideGeometry, wideMaterial);
+                            scene.add(wideLine);
+                        }
+                    }
+                }
+            }
+            
+            // Add lighting
+            const ambientLight = new THREE.AmbientLight(0xffffff, 1.0);
+            scene.add(ambientLight);
+        }
+
+        // Color mapping function to map values to colors
+        function getColorForValue(value, min = 0, max = 20) {
+            // Ensure value is in valid range
+            value = Math.max(min, Math.min(max, value));
+            
+            // Define color stops (from deep blue to bright red)
+            const colorStops = [
+                { value: 0, color: new THREE.Color(0x000088) },     // deep blue
+                { value: 2, color: new THREE.Color(0x0000BB) },     // deep blue
+                { value: 4, color: new THREE.Color(0x0000FF) },     // blue
+                { value: 6, color: new THREE.Color(0x3366FF) },     // medium blue
+                { value: 8, color: new THREE.Color(0x6699FF) },     // light blue
+                { value: 10, color: new THREE.Color(0x99CCFF) },    // very light blue
+                { value: 12, color: new THREE.Color(0xCCDDFF) },    // extremely light blue
+                { value: 14, color: new THREE.Color(0xFFCCCC) },    // extremely light red
+                { value: 16, color: new THREE.Color(0xFF9999) },    // light red
+                { value: 18, color: new THREE.Color(0xFF5555) },    // medium red
+                { value: 20, color: new THREE.Color(0xFF0000) }     // bright red
+            ];
+
+            // Find the closest color stop
+            for (let i = 0; i < colorStops.length; i++) {
+                if (Math.abs(value - colorStops[i].value) < 0.001) {
+                    return colorStops[i].color;
+                }
+            }
+            
+            // If not an exact contour level, find which interval it belongs to
+            for (let i = 0; i < colorStops.length - 1; i++) {
+                if (value > colorStops[i].value && value <= colorStops[i + 1].value) {
+                    // In discrete mode, use the lower bound color
+                    return colorStops[i].color;
+                }
+            }
+            
+            // Default to the first color
+            return colorStops[0].color;
+        }
+
+        // 修改等高线生成函数，提高精度和鲁棒性
+        function findContourSegments(xValues, yValues, vValues, level) {
+            // Increase overall resolution
+            let complexity = 0;
+            for (let i = 0; i < vValues.length - 1; i++) {
+                for (let j = 0; j < vValues[i].length - 1; j++) {
+                    // Calculate cell value gradient
+                    const gradient = Math.abs(vValues[i][j] - vValues[i+1][j]) + 
+                                   Math.abs(vValues[i][j] - vValues[i][j+1]);
+                    complexity = Math.max(complexity, gradient);
+                }
+            }
+            
+            // Increase subdivision
+            const subDivisions = complexity > 5 ? 64 : (complexity > 2 ? 48 : 32);
+            
+            // Smaller numerical precision tolerance
+            const epsilon = 1e-12;
+            
+            const segments = [];
+            
+            // 细分并插值
+            const interpXValues = interpolateArray(xValues, (xValues.length - 1) * subDivisions + 1);
+            const interpYValues = interpolateArray(yValues, (yValues.length - 1) * subDivisions + 1);
+            const interpVValues = interpolate2DArray(vValues, xValues, yValues, interpXValues, interpYValues);
+            
+            // 处理每个网格单元
+            for (let i = 0; i < interpYValues.length - 1; i++) {
+                for (let j = 0; j < interpXValues.length - 1; j++) {
+                    const x0 = interpXValues[j];
+                    const x1 = interpXValues[j + 1];
+                    const y0 = interpYValues[i];
+                    const y1 = interpYValues[i + 1];
+                    
+                    const v00 = interpVValues[i][j];
+                    const v10 = interpVValues[i][j + 1];
+                    const v01 = interpVValues[i + 1][j];
+                    const v11 = interpVValues[i + 1][j + 1];
+                    
+                    // 检查网格单元的四个顶点是否有 null 值，如果有则跳过此单元
+                    if (v00 === null || v10 === null || v01 === null || v11 === null) {
+                        continue; // Skip grid cells with null values
+                    }
+                    
+                    // 存储交点
+                    const intersections = [];
+                    
+                    // 检查四条边是否有交点 - 使用更稳健的比较
+                    // 底边
+                    if ((v00 < level - epsilon && v10 >= level - epsilon) || 
+                        (v00 >= level - epsilon && v10 < level - epsilon)) {
+                        const t = (level - v00) / (v10 - v00);
+                        intersections.push(new THREE.Vector3(
+                            x0 + t * (x1 - x0),
+                            y0,
+                            0
+                        ));
+                    }
+                    
+                    // 右边
+                    if ((v10 < level - epsilon && v11 >= level - epsilon) || 
+                        (v10 >= level - epsilon && v11 < level - epsilon)) {
+                        const t = (level - v10) / (v11 - v10);
+                        intersections.push(new THREE.Vector3(
+                            x1,
+                            y0 + t * (y1 - y0),
+                            0
+                        ));
+                    }
+                    
+                    // 顶边
+                    if ((v01 < level - epsilon && v11 >= level - epsilon) || 
+                        (v01 >= level - epsilon && v11 < level - epsilon)) {
+                        const t = (level - v01) / (v11 - v01);
+                        intersections.push(new THREE.Vector3(
+                            x0 + t * (x1 - x0),
+                            y1,
+                            0
+                        ));
+                    }
+                    
+                    // 左边
+                    if ((v00 < level - epsilon && v01 >= level - epsilon) || 
+                        (v00 >= level - epsilon && v01 < level - epsilon)) {
+                        const t = (level - v00) / (v01 - v00);
+                        intersections.push(new THREE.Vector3(
+                            x0,
+                            y0 + t * (y1 - y0),
+                            0
+                        ));
+                    }
+                    
+                    // 如果找到两个交点，创建一个线段
+                    if (intersections.length === 2) {
+                        // 确保线段两端点不重合
+                        if (distanceSquared(intersections[0], intersections[1]) > 1e-10) {
+                            segments.push({
+                                start: intersections[0],
+                                end: intersections[1],
+                                // 添加单元格的梯度信息，用于后续处理
+                                gradient: Math.max(
+                                    Math.abs(v00 - v10),
+                                    Math.abs(v00 - v01),
+                                    Math.abs(v11 - v10),
+                                    Math.abs(v11 - v01)
+                                )
+                            });
+                        }
+                    }
+                }
+            }
+            
+            return segments;
+        }
+
+        // 改进线条连接算法，使用自适应容差
+        function connectSegments(segments) {
+            if (!segments || segments.length === 0) return [];
+            
+            const connectedLines = [];
+            const used = new Set();
+            
+            // 计算所有线段的平均梯度
+            let avgGradient = 0;
+            let gradientCount = 0;
+            for (const seg of segments) {
+                if (seg.gradient !== undefined) {
+                    avgGradient += seg.gradient;
+                    gradientCount++;
+                }
+            }
+            avgGradient = gradientCount > 0 ? avgGradient / gradientCount : 1;
+            
+            // 基于梯度自适应点相等容差
+            function getAdaptiveEpsilon() {
+                return Math.max(0.00001, Math.min(0.001, 0.0005 / Math.max(0.1, avgGradient)));
+            }
+            
+            // 查找与给定点连接的最佳线段
+            function findBestConnectedSegment(point, currentSegmentIndex) {
+                const minDist = Math.max(0.0001, Math.min(0.005, 0.001 / Math.max(0.1, avgGradient)));
+                
+                let bestMatch = null;
+                let bestDistance = minDist;
+                
+                for (let i = 0; i < segments.length; i++) {
+                    if (i === currentSegmentIndex || used.has(i)) continue;
+                    
+                    const segment = segments[i];
+                    
+                    // 计算距离
+                    const distToStart = distanceSquared(point, segment.start);
+                    const distToEnd = distanceSquared(point, segment.end);
+                    
+                    // 找到最近的连接点
+                    if (distToStart < bestDistance) {
+                        bestDistance = distToStart;
+                        bestMatch = { segment, isStart: true, distance: distToStart };
+                    }
+                    
+                    if (distToEnd < bestDistance) {
+                        bestDistance = distToEnd;
+                        bestMatch = { segment, isStart: false, distance: distToEnd };
+                    }
+                }
+                
+                if (bestMatch) {
+                    used.add(segments.indexOf(bestMatch.segment));
+                }
+                
+                return bestMatch;
+            }
+            
+            // 采用贪婪算法连接线段，确保每个线段只使用一次
+            while (used.size < segments.length) {
+                // 找到一个未使用的线段作为起点
+                let startSegmentIndex = -1;
+                for (let i = 0; i < segments.length; i++) {
+                    if (!used.has(i)) {
+                        startSegmentIndex = i;
+                        break;
+                    }
+                }
+                
+                if (startSegmentIndex === -1) break;
+                
+                const currentLine = [];
+                let currentSegment = segments[startSegmentIndex];
+                used.add(startSegmentIndex);
+                
+                // 添加第一个线段
+                currentLine.push(new THREE.Vector3(currentSegment.start.x, currentSegment.start.y, 0));
+                currentLine.push(new THREE.Vector3(currentSegment.end.x, currentSegment.end.y, 0));
+                
+                // 向后延伸
+                let connection = findBestConnectedSegment(currentSegment.start, startSegmentIndex);
+                while (connection) {
+                    const { segment, isStart } = connection;
+                    const point = isStart ? segment.end : segment.start;
+                    currentLine.unshift(new THREE.Vector3(point.x, point.y, 0));
+                    connection = findBestConnectedSegment(point, -1);
+                }
+                
+                // 向前延伸
+                connection = findBestConnectedSegment(currentSegment.end, startSegmentIndex);
+                while (connection) {
+                    const { segment, isStart } = connection;
+                    const point = isStart ? segment.end : segment.start;
+                    currentLine.push(new THREE.Vector3(point.x, point.y, 0));
+                    connection = findBestConnectedSegment(point, -1);
+                }
+                
+                // 应用适度平滑处理
+                if (currentLine.length >= 2) {
+                    // 根据线条长度和角度决定平滑因子
+                    let smoothFactor = 0.15;
+                    
+                    // 长线条减少平滑
+                    if (currentLine.length > 20) {
+                        smoothFactor = 0.1;
+                    }
+                    
+                    const smoothedLine = smoothLine(currentLine, smoothFactor);
+                    connectedLines.push(smoothedLine);
+                }
+            }
+            
+            // 移除重叠线段
+            return removeOverlappingLines(connectedLines);
+        }
+
+        // 添加新函数：移除重叠的线段
+        function removeOverlappingLines(lines) {
+            if (lines.length <= 1) return lines;
+            
+            const result = [lines[0]];
+            
+            // 检查线段是否与已有线段重叠
+            for (let i = 1; i < lines.length; i++) {
+                let overlapping = false;
+                
+                // 对比当前线段和结果集中所有线段
+                for (const existingLine of result) {
+                    // 简单检查：如果两条线有足够多的近似点，视为重叠
+                    let matchingPoints = 0;
+                    const threshold = Math.min(lines[i].length, existingLine.length) * 0.7;
+                    
+                    for (const p1 of lines[i]) {
+                        for (const p2 of existingLine) {
+                            if (distanceSquared(p1, p2) < 0.001) {
+                                matchingPoints++;
+                                if (matchingPoints > threshold) {
+                                    overlapping = true;
+                                    break;
+                                }
+                            }
+                        }
+                        if (overlapping) break;
+                    }
+                    
+                    if (overlapping) break;
+                }
+                
+                // 如果不重叠，添加到结果集
+                if (!overlapping) {
+                    result.push(lines[i]);
+                }
+            }
+            
+            return result;
+        }
+
+        // 改进线条平滑处理 - 替换现有smoothLine函数
+        function smoothLine(points, strength = 0.2) {
+            if (points.length <= 2) return points;
+            
+            // Apply multiple smoothing passes
+            let result = [...points];
+            
+            // Perform more smoothing iterations with varying strength
+            for (let iteration = 0; iteration < 4; iteration++) { // Increase from 3 to 4 iterations
+                const iterationStrength = strength * (1 - iteration * 0.15);
+                const smoothed = [result[0]]; // Keep first point unchanged
+                
+                // Special handling for second point to reduce jaggedness near start
+                if (result.length > 2) {
+                    const p0 = result[0];
+                    const p1 = result[1];
+                    const p2 = result[2];
+                    
+                    const w = 0.25; // Smoothing weight for second point
+                    
+                    const smoothX = p1.x + iterationStrength * w * (p0.x + p2.x - 2 * p1.x);
+                    const smoothY = p1.y + iterationStrength * w * (p0.y + p2.y - 2 * p1.y);
+                    
+                    smoothed.push(new THREE.Vector3(smoothX, smoothY, p1.z));
+                }
+                
+                // Smooth middle points
+                for (let i = 2; i < result.length - 1; i++) {
+                    const prev = result[i - 1];
+                    const curr = result[i];
+                    const next = result[i + 1];
+                    
+                    // Consider points further away
+                    const farPrev = i > 2 ? result[i - 2] : prev;
+                    const farNext = i < result.length - 2 ? result[i + 2] : next;
+                    
+                    // Use a more complex weighting system
+                    const w1 = 0.2; // Increase weight for far points
+                    const w2 = 0.4; // Increase weight for near points
+                    
+                    const smoothX = curr.x + iterationStrength * (
+                        w1 * (farPrev.x + farNext.x) + 
+                        w2 * (prev.x + next.x) - 
+                        2 * (w1 + w2) * curr.x
+                    );
+                    
+                    const smoothY = curr.y + iterationStrength * (
+                        w1 * (farPrev.y + farNext.y) + 
+                        w2 * (prev.y + next.y) - 
+                        2 * (w1 + w2) * curr.y
+                    );
+                    
+                    smoothed.push(new THREE.Vector3(smoothX, smoothY, curr.z));
+                }
+                
+                // Special handling for second-to-last point to reduce jaggedness near end
+                if (result.length > 2) {
+                    const pn = result[result.length - 1];
+                    const pn1 = result[result.length - 2];
+                    const pn2 = result[result.length - 3];
+                    
+                    const w = 0.25; // Smoothing weight for second-to-last point
+                    
+                    const smoothX = pn1.x + iterationStrength * w * (pn.x + pn2.x - 2 * pn1.x);
+                    const smoothY = pn1.y + iterationStrength * w * (pn.y + pn2.y - 2 * pn1.y);
+                    
+                    // Replace previously added second-to-last point
+                    smoothed[smoothed.length - 1] = new THREE.Vector3(smoothX, smoothY, pn1.z);
+                }
+                
+                smoothed.push(result[result.length - 1]); // Keep last point unchanged
+                result = smoothed;
+            }
+            
+            return result;
+        }
+
+        // 辅助函数：计算两点间距离的平方
+        function distanceSquared(p1, p2) {
+            const dx = p1.x - p2.x;
+            const dy = p1.y - p2.y;
+            const dz = (p1.z || 0) - (p2.z || 0);
+            return dx * dx + dy * dy + dz * dz;
+        }
+
+        // 辅助函数：对1D数组进行线性插值到指定长度
+        function interpolateArray(arr, newLength) {
+            const result = [];
+            const step = (arr.length - 1) / (newLength - 1);
+            
+            for (let i = 0; i < newLength; i++) {
+                const index = i * step;
+                const lowIndex = Math.floor(index);
+                const highIndex = Math.ceil(index);
+                
+                if (lowIndex === highIndex) {
+                    result.push(arr[lowIndex]);
+                } else {
+                    const t = index - lowIndex;
+                    result.push(arr[lowIndex] * (1 - t) + arr[highIndex] * t);
+                }
+            }
+            
+            return result;
+        }
+
+        // 辅助函数：2D数组插值
+        function interpolate2DArray(values, xOrig, yOrig, xNew, yNew) {
+            const result = [];
+            
+            for (let i = 0; i < yNew.length; i++) {
+                result[i] = [];
+                
+                for (let j = 0; j < xNew.length; j++) {
+                    result[i][j] = interpolateValue(xNew[j], yNew[i], xOrig, yOrig, values);
+                }
+            }
+            
+            return result;
+        }
+
+        // Modify interpolateValue function to enhance boundary checking and error handling
+        function interpolateValue(x, y, xValues, yValues, vValues) {
+            // Check input array validity
+            if (!xValues || !yValues || !vValues || 
+                xValues.length === 0 || yValues.length === 0 || vValues.length === 0) {
+                return null;
+            }
+            
+            // Ensure x and y are within valid range
+            if (x < xValues[0] || x > xValues[xValues.length - 1] ||
+                y < yValues[0] || y > yValues[yValues.length - 1]) {
+                // Out of range, return closest boundary value
+                const xIndex = x < xValues[0] ? 0 : xValues.length - 1;
+                const yIndex = y < yValues[0] ? 0 : yValues.length - 1;
+                return vValues[yIndex] && vValues[yIndex][xIndex] !== undefined ? 
+                       vValues[yIndex][xIndex] : null;
+            }
+            
+            // Find x index range
+            let x1Index = 0;
+            while (x1Index < xValues.length - 1 && xValues[x1Index + 1] < x) {
+                x1Index++;
+            }
+            let x2Index = Math.min(x1Index + 1, xValues.length - 1);
+            
+            // Find y index range
+            let y1Index = 0;
+            while (y1Index < yValues.length - 1 && yValues[y1Index + 1] < y) {
+                y1Index++;
+            }
+            let y2Index = Math.min(y1Index + 1, yValues.length - 1);
+            
+            // Ensure indices are within array bounds
+            if (y1Index >= vValues.length || y2Index >= vValues.length ||
+                !vValues[y1Index] || !vValues[y2Index]) {
+                return null;
+            }
+            
+            // If point falls exactly on a grid point and value is available
+            if (x === xValues[x1Index] && y === yValues[y1Index] && 
+                vValues[y1Index] && vValues[y1Index][x1Index] !== undefined) {
+                return vValues[y1Index][x1Index];
+            }
+            
+            // Ensure x indices are within array bounds
+            if (x1Index >= (vValues[y1Index] || []).length || 
+                x2Index >= (vValues[y1Index] || []).length ||
+                x1Index >= (vValues[y2Index] || []).length || 
+                x2Index >= (vValues[y2Index] || []).length) {
+                return null;
+            }
+            
+            // Safely get values at the four corners
+            let v11 = null, v12 = null, v21 = null, v22 = null;
+            
+            // Use optional chaining and nullish coalescing to safely access array
+            if (vValues[y1Index] && x1Index in vValues[y1Index]) {
+                v11 = vValues[y1Index][x1Index];
+            }
+            
+            if (vValues[y1Index] && x2Index in vValues[y1Index]) {
+                v12 = vValues[y1Index][x2Index];
+            }
+            
+            if (vValues[y2Index] && x1Index in vValues[y2Index]) {
+                v21 = vValues[y2Index][x1Index];
+            }
+            
+            if (vValues[y2Index] && x2Index in vValues[y2Index]) {
+                v22 = vValues[y2Index][x2Index];
+            }
+            
+            // Check for null values
+            if (v11 === null || v12 === null || v21 === null || v22 === null) {
+                // If there are nulls, use the average of non-null values
+                const validValues = [v11, v12, v21, v22].filter(v => v !== null);
+                if (validValues.length === 0) {
+                    return null; // If all values are null, return null
+                }
+                return validValues.reduce((sum, v) => sum + v, 0) / validValues.length;
+            }
+            
+            // Calculate weights
+            const x1 = xValues[x1Index];
+            const x2 = xValues[x2Index];
+            const y1 = yValues[y1Index];
+            const y2 = yValues[y2Index];
+            
+            // Prevent division by zero
+            if (x1 === x2 || y1 === y2) {
+                return (v11 + v12 + v21 + v22) / 4;
+            }
+            
+            // Bilinear interpolation
+            const wx = (x - x1) / (x2 - x1);
+            const wy = (y - y1) / (y2 - y1);
+            
+            const vTop = v11 * (1 - wx) + v12 * wx;
+            const vBottom = v21 * (1 - wx) + v22 * wx;
+            
+            return vTop * (1 - wy) + vBottom * wy;
+        }
+
+        // Create the contour surface
+        createContourSurface(data);
+
+        // Animation loop
+        function animate() {
+            requestAnimationFrame(animate);
+            controls.update();
+            renderer.render(scene, camera);
+        }
+        
+        animate();
+
+        // Handle window resize
+        window.addEventListener('resize', () => {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        });
+    </script>
+</body>
+</html> 

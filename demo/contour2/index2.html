@@ -1,0 +1,638 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Three.js Contour Plot</title>
+    <style>
+        body { margin: 0; overflow: hidden; }
+        canvas { display: block; }
+    </style>
+</head>
+<body>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.132.2/build/three.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.132.2/examples/js/controls/OrbitControls.js"></script>
+
+    <script>
+        // Data provided
+        var data = [{
+            v: [[10, 10.625, 12.5, 15.625, 20],
+                [5.625, 6.25, 8.125, 11.25, 15.625],
+                [2.5, 3.125, 5., 8.125, 12.5],
+                [0.625, 1.25, 3.125, 6.25, 10.625],
+                [0, 0.625, 2.5, 5.625, 10]],
+            x: [-9, -6, -5, -3, -1],
+            y: [0, 1, 4, 5, 7],
+            type: 'contour'
+        }];
+
+        // Initialize Three.js scene, camera, and renderer
+        const scene = new THREE.Scene();
+        scene.background = new THREE.Color(0xffffff);
+        
+        // Set camera to match the target image
+        const camera = new THREE.PerspectiveCamera(40, window.innerWidth / window.innerHeight, 0.1, 1000);
+        camera.position.set(-5, -12, 8); // Matches the target perspective
+        camera.up.set(0, 0, 1);
+        camera.lookAt(-5, 0, 0);
+
+        const renderer = new THREE.WebGLRenderer({ 
+            antialias: true,
+            alpha: true,
+            preserveDrawingBuffer: true
+        });
+        renderer.setPixelRatio(window.devicePixelRatio); // 使用设备像素比例提高清晰度
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        document.body.appendChild(renderer.domElement);
+
+        // Add orbit controls
+        const controls = new THREE.OrbitControls(camera, renderer.domElement);
+        controls.enableDamping = true;
+        controls.dampingFactor = 0.25;
+        controls.rotateSpeed = 0.7;
+        controls.zoomSpeed = 1.2;
+
+        // Improved color mapping function
+        function getColorForValue(value, min, max) {
+            // 定义离散的颜色级别
+            const colorStops = [
+                { value: 0, color: new THREE.Color(0x000088) },     // deep blue
+                { value: 2, color: new THREE.Color(0x0000cc) },     // dark blue
+                { value: 4, color: new THREE.Color(0x0033ff) },     // medium blue
+                { value: 6, color: new THREE.Color(0x3366ff) },     // blue
+                { value: 8, color: new THREE.Color(0x6699ff) },     // light blue
+                { value: 10, color: new THREE.Color(0x99ccff) },    // pale blue
+                { value: 12, color: new THREE.Color(0xccddff) },    // very pale blue
+                { value: 14, color: new THREE.Color(0xffcccc) },    // very pale red
+                { value: 16, color: new THREE.Color(0xff9999) },    // pale red
+                { value: 18, color: new THREE.Color(0xff5555) },    // light red
+                { value: 20, color: new THREE.Color(0xff0000) }     // bright red
+            ];
+            
+            // 找到适当的颜色级别
+            let lowerStop = colorStops[0];
+            let upperStop = colorStops[colorStops.length - 1];
+            
+            for (let i = 0; i < colorStops.length - 1; i++) {
+                if (value >= colorStops[i].value && value < colorStops[i + 1].value) {
+                    // 使用下限的颜色作为整个区间的颜色，实现离散效果
+                    return colorStops[i].color;
+                }
+            }
+            
+            // 默认返回最后一个颜色
+            return upperStop.color;
+        }
+
+        // Function to create a smoother surface
+        function createContourSurface(data) {
+            const contourData = data[0];
+            const xValues = contourData.x;
+            const yValues = contourData.y;
+            const vValues = contourData.v;
+            
+            // 使用更精确的等高线级别
+            const contourLevels = [0, 2, 4, 6, 8, 10, 12, 14, 16, 18, 20];
+            
+            // 清除场景中的现有对象，避免重复渲染
+            while(scene.children.length > 0) { 
+                scene.remove(scene.children[0]); 
+            }
+            
+            // 获取所有等高线段和填充区域
+            const allSegments = {};
+            for (let level of contourLevels) {
+                allSegments[level] = findContourSegments(xValues, yValues, vValues, level);
+            }
+            
+            // 首先确保所有填充区域严格对齐等高线并扩展到边界
+            for (let i = 0; i < contourLevels.length - 1; i++) {
+                const lowerLevel = contourLevels[i];
+                const upperLevel = contourLevels[i + 1];
+                const midLevel = (lowerLevel + upperLevel) / 2;
+                const color = getColorForValue(midLevel, 0, 20);
+                
+                // 创建带有边缘扩展的填充区域
+                createOptimizedFilledArea(xValues, yValues, vValues, lowerLevel, upperLevel, color, allSegments);
+            }
+            
+            // 使用较粗的线条渲染等高线，避免缝隙
+            for (let level of contourLevels) {
+                if (level === 0 || level === 20) continue; // 跳过边界等高线
+                
+                const segments = allSegments[level];
+                const connectedLines = connectSegments(segments);
+                
+                // 创建高质量等高线
+                const lineMaterial = new THREE.LineBasicMaterial({
+                    color: 0x000000,
+                    linewidth: 2.5, // 增加线宽
+                    transparent: false
+                });
+                
+                for (const line of connectedLines) {
+                    if (line.length >= 2) {
+                        // 对线条点进行轻微偏移以确保完美覆盖填充区域边缘
+                        const adjustedPoints = line.map(p => new THREE.Vector3(
+                            p.x,
+                            p.y,
+                            0.015 // 确保线条始终在填充区域上方
+                        ));
+                        
+                        const geometry = new THREE.BufferGeometry().setFromPoints(adjustedPoints);
+                        const contourLine = new THREE.Line(geometry, lineMaterial);
+                        scene.add(contourLine);
+                    }
+                }
+            }
+            
+            // 添加光照以增强渲染效果
+            const ambientLight = new THREE.AmbientLight(0xffffff, 1.0);
+            scene.add(ambientLight);
+            
+            const directionalLight = new THREE.DirectionalLight(0xffffff, 0.5);
+            directionalLight.position.set(1, 1, 10);
+            scene.add(directionalLight);
+        }
+
+        // 创建优化的填充区域，确保与等高线完美对齐
+        function createOptimizedFilledArea(xValues, yValues, vValues, minLevel, maxLevel, color, allSegments) {
+            // 确保填充区域略微偏移以避免z-fighting
+            const fillZOffset = -0.005;
+            
+            // 连接等高线段，创建封闭路径
+            const lowerLines = connectSegments(allSegments[minLevel]);
+            const upperLines = connectSegments(allSegments[maxLevel]);
+            
+            // 创建背景填充，确保整个区域都有颜色
+            createBackgroundFill(xValues, yValues, vValues, minLevel, maxLevel, color, fillZOffset);
+            
+            // 如果有适当的等高线，创建更精确的填充
+            if (lowerLines.length > 0 && upperLines.length > 0) {
+                // 尝试每个等高线组合
+                for (const lowerPath of lowerLines) {
+                    for (const upperPath of upperLines) {
+                        if (lowerPath.length >= 3 && upperPath.length >= 3) {
+                            createSeamlessPolygon(lowerPath, upperPath, color, fillZOffset);
+                        }
+                    }
+                }
+            }
+        }
+
+        // 创建无缝拼接的多边形填充
+        function createSeamlessPolygon(lowerPath, upperPath, color, zOffset = 0) {
+            // 创建扩展点 - 确保填充区域略微扩大以覆盖线条
+            function expandPoints(path, epsilon = 0.001) {
+                if (path.length < 3) return path;
+                
+                const center = new THREE.Vector3(0, 0, 0);
+                for (const p of path) center.add(p);
+                center.divideScalar(path.length);
+                
+                return path.map(p => {
+                    const dir = new THREE.Vector3().subVectors(p, center).normalize();
+                    return new THREE.Vector3(
+                        p.x + dir.x * epsilon,
+                        p.y + dir.y * epsilon,
+                        zOffset
+                    );
+                });
+            }
+            
+            // 扩展路径点以确保无缝覆盖
+            const expandedLower = expandPoints(lowerPath);
+            const expandedUpper = expandPoints(upperPath);
+            
+            // 创建一个形状，用于三角形剖分
+            const shape = new THREE.Shape();
+            
+            // 从下部路径开始
+            shape.moveTo(expandedLower[0].x, expandedLower[0].y);
+            for (let i = 1; i < expandedLower.length; i++) {
+                shape.lineTo(expandedLower[i].x, expandedLower[i].y);
+            }
+            
+            // 添加上部路径（反向）
+            for (let i = expandedUpper.length - 1; i >= 0; i--) {
+                shape.lineTo(expandedUpper[i].x, expandedUpper[i].y);
+            }
+            
+            shape.closePath();
+            
+            // 使用THREE.js内置的三角剖分，创建高质量几何体
+            const geometry = new THREE.ShapeGeometry(shape);
+            
+            // 应用平坦着色材质，确保颜色均匀
+            const material = new THREE.MeshBasicMaterial({
+                color: color,
+                side: THREE.DoubleSide,
+                flatShading: true,
+                transparent: false,
+                depthWrite: true
+            });
+            
+            const mesh = new THREE.Mesh(geometry, material);
+            mesh.position.z = zOffset; // 设置z偏移，避免z-fighting
+            scene.add(mesh);
+        }
+
+        // 创建背景填充，确保整个区域都有颜色
+        function createBackgroundFill(xValues, yValues, vValues, minLevel, maxLevel, color, zOffset) {
+            const gridSize = 200; // 增加网格分辨率，提高边缘质量
+            const minX = xValues[0];
+            const maxX = xValues[xValues.length - 1];
+            const minY = yValues[0];
+            const maxY = yValues[yValues.length - 1];
+            
+            const xStep = (maxX - minX) / gridSize;
+            const yStep = (maxY - minY) / gridSize;
+            
+            const vertices = [];
+            const indices = [];
+            let vertexCount = 0;
+            
+            // 预计算网格点
+            const gridPoints = Array(gridSize + 1).fill().map(() => Array(gridSize + 1).fill(null));
+            const inRange = Array(gridSize + 1).fill().map(() => Array(gridSize + 1).fill(false));
+            
+            // 计算每个网格点的值
+            for (let i = 0; i <= gridSize; i++) {
+                const y = minY + i * yStep;
+                
+                for (let j = 0; j <= gridSize; j++) {
+                    const x = minX + j * xStep;
+                    
+                    // 使用高精度插值获取该点的v值
+                    const v = interpolateValue(x, y, xValues, yValues, vValues);
+                    
+                    gridPoints[i][j] = { x, y, v };
+                    inRange[i][j] = (v >= minLevel && v < maxLevel);
+                }
+            }
+            
+            // 扫描并创建单元格
+            for (let i = 0; i < gridSize; i++) {
+                for (let j = 0; j < gridSize; j++) {
+                    // 获取单元格四个角的值
+                    const p00 = gridPoints[i][j];
+                    const p10 = gridPoints[i][j + 1];
+                    const p11 = gridPoints[i + 1][j + 1];
+                    const p01 = gridPoints[i + 1][j];
+                    
+                    // 检查这个单元格的四个角是否都在范围内
+                    if (inRange[i][j] && inRange[i][j + 1] && 
+                        inRange[i + 1][j + 1] && inRange[i + 1][j]) {
+                        
+                        // 添加顶点
+                        vertices.push(
+                            p00.x, p00.y, zOffset,
+                            p10.x, p10.y, zOffset,
+                            p11.x, p11.y, zOffset,
+                            p01.x, p01.y, zOffset
+                        );
+                        
+                        // 添加索引（两个三角形）
+                        indices.push(
+                            vertexCount, vertexCount + 1, vertexCount + 2,
+                            vertexCount, vertexCount + 2, vertexCount + 3
+                        );
+                        
+                        vertexCount += 4;
+                    }
+                }
+            }
+            
+            if (vertices.length === 0) return;
+            
+            // 创建几何体
+            const geometry = new THREE.BufferGeometry();
+            geometry.setAttribute('position', new THREE.Float32BufferAttribute(vertices, 3));
+            geometry.setIndex(indices);
+            
+            // 创建材质并添加网格
+            const material = new THREE.MeshBasicMaterial({
+                color: color,
+                side: THREE.DoubleSide,
+                transparent: false,
+                flatShading: true
+            });
+            
+            const mesh = new THREE.Mesh(geometry, material);
+            scene.add(mesh);
+        }
+
+        // 查找等高线段：提高精度，减少锯齿
+        function findContourSegments(xValues, yValues, vValues, level) {
+            const segments = [];
+            
+            // 增加细分以获得更高精度的等高线 - 使用更高的细分度
+            const subDivisions = 32; // 大幅增加细分以获得更平滑的线条
+            const interpXValues = interpolateArray(xValues, (xValues.length - 1) * subDivisions + 1);
+            const interpYValues = interpolateArray(yValues, (yValues.length - 1) * subDivisions + 1);
+            const interpVValues = interpolate2DArray(vValues, xValues, yValues, interpXValues, interpYValues);
+            
+            // 处理每个网格单元
+            for (let i = 0; i < interpYValues.length - 1; i++) {
+                for (let j = 0; j < interpXValues.length - 1; j++) {
+                    const x0 = interpXValues[j];
+                    const x1 = interpXValues[j + 1];
+                    const y0 = interpYValues[i];
+                    const y1 = interpYValues[i + 1];
+                    
+                    const v00 = interpVValues[i][j];
+                    const v10 = interpVValues[i][j + 1];
+                    const v01 = interpVValues[i + 1][j];
+                    const v11 = interpVValues[i + 1][j + 1];
+                    
+                    // 存储交点
+                    const intersections = [];
+                    
+                    // 检查四条边是否有交点
+                    // 底边
+                    if ((v00 < level && v10 >= level) || (v00 >= level && v10 < level)) {
+                        const t = (level - v00) / (v10 - v00);
+                        intersections.push(new THREE.Vector3(
+                            x0 + t * (x1 - x0),
+                            y0,
+                            0
+                        ));
+                    }
+                    
+                    // 右边
+                    if ((v10 < level && v11 >= level) || (v10 >= level && v11 < level)) {
+                        const t = (level - v10) / (v11 - v10);
+                        intersections.push(new THREE.Vector3(
+                            x1,
+                            y0 + t * (y1 - y0),
+                            0
+                        ));
+                    }
+                    
+                    // 顶边
+                    if ((v01 < level && v11 >= level) || (v01 >= level && v11 < level)) {
+                        const t = (level - v01) / (v11 - v01);
+                        intersections.push(new THREE.Vector3(
+                            x0 + t * (x1 - x0),
+                            y1,
+                            0
+                        ));
+                    }
+                    
+                    // 左边
+                    if ((v00 < level && v01 >= level) || (v00 >= level && v01 < level)) {
+                        const t = (level - v00) / (v01 - v00);
+                        intersections.push(new THREE.Vector3(
+                            x0,
+                            y0 + t * (y1 - y0),
+                            0
+                        ));
+                    }
+                    
+                    // 如果找到两个交点，创建一个线段
+                    if (intersections.length === 2) {
+                        segments.push({
+                            start: intersections[0],
+                            end: intersections[1]
+                        });
+                    }
+                }
+            }
+            
+            return segments;
+        }
+
+        // 优化连接等高线的函数，确保更加准确的线条
+        function connectSegments(segments) {
+            if (!segments || segments.length === 0) return [];
+            
+            const connectedLines = [];
+            const used = new Set();
+            
+            // 使用更精确的点相等检测
+            function pointsEqual(p1, p2, epsilon = 0.00005) {
+                return Math.abs(p1.x - p2.x) < epsilon &&
+                       Math.abs(p1.y - p2.y) < epsilon &&
+                       Math.abs(p1.z - p2.z) < epsilon;
+            }
+            
+            // 查找与给定点连接的最佳线段
+            function findBestConnectedSegment(point, currentSegmentIndex) {
+                let bestMatch = null;
+                let minDist = 0.001; // 最小距离阈值
+                
+                for (let i = 0; i < segments.length; i++) {
+                    if (i === currentSegmentIndex || used.has(i)) continue;
+                    
+                    const segment = segments[i];
+                    
+                    // 计算到起点和终点的距离
+                    const distToStart = distanceSquared(point, segment.start);
+                    const distToEnd = distanceSquared(point, segment.end);
+                    
+                    // 如果点足够近，选择最近的那个
+                    if (distToStart < minDist && distToStart < distToEnd) {
+                        minDist = distToStart;
+                        bestMatch = { segment, isStart: true, distance: distToStart };
+                    } else if (distToEnd < minDist) {
+                        minDist = distToEnd;
+                        bestMatch = { segment, isStart: false, distance: distToEnd };
+                    }
+                }
+                
+                if (bestMatch) {
+                    used.add(segments.indexOf(bestMatch.segment));
+                }
+                
+                return bestMatch;
+            }
+            
+            // 尝试构建连续的等高线，更关注质量
+            while (used.size < segments.length) {
+                // 找到一个未使用的线段作为起点
+                let startSegmentIndex = -1;
+                for (let i = 0; i < segments.length; i++) {
+                    if (!used.has(i)) {
+                        startSegmentIndex = i;
+                        break;
+                    }
+                }
+                
+                if (startSegmentIndex === -1) break;
+                
+                const currentLine = [];
+                let currentSegment = segments[startSegmentIndex];
+                used.add(startSegmentIndex);
+                
+                // 添加第一个线段
+                currentLine.push(new THREE.Vector3(currentSegment.start.x, currentSegment.start.y, 0));
+                currentLine.push(new THREE.Vector3(currentSegment.end.x, currentSegment.end.y, 0));
+                
+                // 向后延伸
+                let connection = findBestConnectedSegment(currentSegment.start, startSegmentIndex);
+                while (connection) {
+                    const { segment, isStart } = connection;
+                    const point = isStart ? segment.end : segment.start;
+                    // 插入到线的前面
+                    currentLine.unshift(new THREE.Vector3(point.x, point.y, 0));
+                    connection = findBestConnectedSegment(point, -1);
+                }
+                
+                // 向前延伸
+                connection = findBestConnectedSegment(currentSegment.end, startSegmentIndex);
+                while (connection) {
+                    const { segment, isStart } = connection;
+                    const point = isStart ? segment.end : segment.start;
+                    // 添加到线的末尾
+                    currentLine.push(new THREE.Vector3(point.x, point.y, 0));
+                    connection = findBestConnectedSegment(point, -1);
+                }
+                
+                // 添加连接好的线
+                if (currentLine.length >= 2) {
+                    // 对线条进行平滑处理，减少锯齿
+                    const smoothedLine = smoothLine(currentLine, 0.2);
+                    connectedLines.push(smoothedLine);
+                }
+            }
+            
+            return connectedLines;
+        }
+
+        // 添加线条平滑函数，减少锯齿
+        function smoothLine(points, strength = 0.2) {
+            if (points.length <= 2) return points;
+            
+            const smoothed = [points[0]]; // 保持第一个点不变
+            
+            // 对中间点进行平滑处理
+            for (let i = 1; i < points.length - 1; i++) {
+                const prev = points[i - 1];
+                const curr = points[i];
+                const next = points[i + 1];
+                
+                // 计算平滑后的位置
+                const smoothX = curr.x + strength * ((prev.x + next.x) / 2 - curr.x);
+                const smoothY = curr.y + strength * ((prev.y + next.y) / 2 - curr.y);
+                
+                smoothed.push(new THREE.Vector3(smoothX, smoothY, curr.z));
+            }
+            
+            smoothed.push(points[points.length - 1]); // 保持最后一个点不变
+            
+            return smoothed;
+        }
+
+        // 辅助函数：计算两点间距离的平方
+        function distanceSquared(p1, p2) {
+            const dx = p1.x - p2.x;
+            const dy = p1.y - p2.y;
+            const dz = (p1.z || 0) - (p2.z || 0);
+            return dx * dx + dy * dy + dz * dz;
+        }
+
+        // 辅助函数：对1D数组进行线性插值到指定长度
+        function interpolateArray(arr, newLength) {
+            const result = [];
+            const step = (arr.length - 1) / (newLength - 1);
+            
+            for (let i = 0; i < newLength; i++) {
+                const index = i * step;
+                const lowIndex = Math.floor(index);
+                const highIndex = Math.ceil(index);
+                
+                if (lowIndex === highIndex) {
+                    result.push(arr[lowIndex]);
+                } else {
+                    const t = index - lowIndex;
+                    result.push(arr[lowIndex] * (1 - t) + arr[highIndex] * t);
+                }
+            }
+            
+            return result;
+        }
+
+        // 辅助函数：2D数组插值
+        function interpolate2DArray(values, xOrig, yOrig, xNew, yNew) {
+            const result = [];
+            
+            for (let i = 0; i < yNew.length; i++) {
+                result[i] = [];
+                
+                for (let j = 0; j < xNew.length; j++) {
+                    result[i][j] = interpolateValue(xNew[j], yNew[i], xOrig, yOrig, values);
+                }
+            }
+            
+            return result;
+        }
+
+        // 辅助函数：根据坐标插值获取v值
+        function interpolateValue(x, y, xValues, yValues, vValues) {
+            // 找到x坐标的下标范围
+            let x1Index = 0;
+            while (x1Index < xValues.length - 1 && xValues[x1Index + 1] < x) {
+                x1Index++;
+            }
+            let x2Index = Math.min(x1Index + 1, xValues.length - 1);
+            
+            // 找到y坐标的下标范围
+            let y1Index = 0;
+            while (y1Index < yValues.length - 1 && yValues[y1Index + 1] < y) {
+                y1Index++;
+            }
+            let y2Index = Math.min(y1Index + 1, yValues.length - 1);
+            
+            // 如果点恰好落在网格上
+            if (x === xValues[x1Index] && y === yValues[y1Index]) {
+                return vValues[y1Index][x1Index];
+            }
+            
+            // 获取四个角的值
+            const v11 = vValues[y1Index][x1Index];
+            const v12 = vValues[y1Index][x2Index];
+            const v21 = vValues[y2Index][x1Index];
+            const v22 = vValues[y2Index][x2Index];
+            
+            // 计算权重
+            const x1 = xValues[x1Index];
+            const x2 = xValues[x2Index];
+            const y1 = yValues[y1Index];
+            const y2 = yValues[y2Index];
+            
+            // 防止除以零
+            if (x1 === x2 || y1 === y2) {
+                return (v11 + v12 + v21 + v22) / 4;
+            }
+            
+            // 双线性插值
+            const wx = (x - x1) / (x2 - x1);
+            const wy = (y - y1) / (y2 - y1);
+            
+            const vTop = v11 * (1 - wx) + v12 * wx;
+            const vBottom = v21 * (1 - wx) + v22 * wx;
+            
+            return vTop * (1 - wy) + vBottom * wy;
+        }
+
+        // Create the contour surface
+        createContourSurface(data);
+
+        // Animation loop
+        function animate() {
+            requestAnimationFrame(animate);
+            controls.update();
+            renderer.render(scene, camera);
+        }
+        
+        animate();
+
+        // Handle window resize
+        window.addEventListener('resize', () => {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        });
+    </script>
+</body>
+</html> 
