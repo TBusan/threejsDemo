@@ -118,13 +118,9 @@
         camera.position.set(0, 0, 1.5);
         const renderer = new THREE.WebGLRenderer({ 
             antialias: true,
+            logarithmicDepthBuffer: true  // 启用对数深度缓冲解决Z-fighting
         });
-        // 设置渲染器
-        // const renderer = new THREE.WebGLRenderer({ 
-        //     antialias: true,
-        //     logarithmicDepthBuffer: true  // Add logarithmic depth buffer to solve Z-fighting
-        // });
-        // renderer.setPixelRatio(window.devicePixelRatio);
+        renderer.setPixelRatio(window.devicePixelRatio);
         renderer.setSize(window.innerWidth, window.innerHeight);
         document.getElementById('container').appendChild(renderer.domElement);
         
@@ -154,61 +150,86 @@
         // ===== 为每个等值线创建 3D 高程效果 =====
         
         // 获取每个等值线的高度值
-        const heightScale = 0.05; // Reduce overall height
-        const layerGap = 0.02;    // Add explicit layer spacing
+        const heightScale = 0.05; // 整体高度比例
+        const layerGap = 0.002;   // 减小层间距
         const minValue = d3.min(contours, d => d.value);
         const maxValue = d3.max(contours, d => d.value);
         
         // 对每个等值线创建挤压几何体
         contours.forEach((contour, i) => {
-            // 将 D3 路径转换为 Three.js 形状
-            const shape = new THREE.Shape();
-            let started = false;
-            
-            // 提取路径点
-            const coordinates = contour.coordinates;
-            
-            // 简化点集以减少复杂度
-            const simplifiedPoints = simplifyPoints(coordinates[0][0], 0.5);
-            
-            simplifiedPoints.forEach((point, j) => {
-                // 归一化坐标
-                const x = (point[0] / width - 0.5) * aspectRatio;
-                const y = -(point[1] / height - 0.5); // Y 坐标反转
-                
-                if (j === 0) {
-                    shape.moveTo(x, y);
-                } else {
-                    shape.lineTo(x, y);
-                }
-            });
-            
-            // 创建挤压几何体
+            // 获取归一化高度值
             const normalizedValue = (contour.value - minValue) / (maxValue - minValue);
-            const extrudeSettings = {
-                steps: 2, // Increase steps for smoother sides
-                depth: normalizedValue * heightScale,
-                bevelEnabled: false
-            };
+            const extrudeHeight = normalizedValue * heightScale;
             
-            const contourGeometry = new THREE.ExtrudeGeometry(shape, extrudeSettings);
-            
-            // 创建材质
-            const contourMaterial = new THREE.MeshPhongMaterial({
-                color: new THREE.Color(colorScale(contour.value)),
-                transparent: true,
-                opacity: 0.8,
-                side: THREE.DoubleSide,
-                depthWrite: true,       // Ensure depth writing
-                polygonOffset: true,    // Enable polygon offset
-                polygonOffsetFactor: 1, // Offset factor
-                polygonOffsetUnits: 1   // Offset units
+            // 处理所有轮廓部分（contour可能包含多个分离的部分）
+            contour.coordinates.forEach(polygon => {
+                // 创建形状
+                const shape = new THREE.Shape();
+                
+                // 处理外环（第一个点集）
+                const outerRing = simplifyPoints(polygon[0], 0.5);
+                
+                // 外环点集构建主形状
+                outerRing.forEach((point, j) => {
+                    // 归一化坐标
+                    const x = (point[0] / width - 0.5) * aspectRatio;
+                    const y = -(point[1] / height - 0.5); // Y坐标反转
+                    
+                    if (j === 0) {
+                        shape.moveTo(x, y);
+                    } else {
+                        shape.lineTo(x, y);
+                    }
+                });
+                
+                // 处理内环（如果有的话）- 这些是形状中的"孔"
+                if (polygon.length > 1) {
+                    for (let h = 1; h < polygon.length; h++) {
+                        const holePoints = simplifyPoints(polygon[h], 0.5);
+                        const holePath = new THREE.Path();
+                        
+                        holePoints.forEach((point, j) => {
+                            const x = (point[0] / width - 0.5) * aspectRatio;
+                            const y = -(point[1] / height - 0.5);
+                            
+                            if (j === 0) {
+                                holePath.moveTo(x, y);
+                            } else {
+                                holePath.lineTo(x, y);
+                            }
+                        });
+                        
+                        shape.holes.push(holePath);
+                    }
+                }
+                
+                // 创建挤压几何体
+                const extrudeSettings = {
+                    steps: 2,
+                    depth: extrudeHeight,
+                    bevelEnabled: false
+                };
+                
+                const contourGeometry = new THREE.ExtrudeGeometry(shape, extrudeSettings);
+                
+                // 创建材质
+                const contourMaterial = new THREE.MeshPhongMaterial({
+                    color: new THREE.Color(colorScale(contour.value)),
+                    transparent: true,
+                    opacity: 0.9,
+                    side: THREE.DoubleSide,
+                    depthWrite: true,
+                    polygonOffset: true,
+                    polygonOffsetFactor: i, // 使用索引作为偏移因子，确保正确分层
+                    polygonOffsetUnits: 1
+                });
+                
+                // 创建网格并添加到场景
+                const contourMesh = new THREE.Mesh(contourGeometry, contourMaterial);
+                // 每个层的Z值应该是前一层的高度加上间隔
+                contourMesh.position.z = i * layerGap;
+                scene.add(contourMesh);
             });
-            
-            // 创建网格并添加到场景
-            const contourMesh = new THREE.Mesh(contourGeometry, contourMaterial);
-            contourMesh.position.z = layerGap * i; 
-            scene.add(contourMesh);
         });
         
         // 添加光源
