@@ -1,0 +1,828 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <title>Three.js 多方向等值线图</title>
+    <script src="https://d3js.org/d3.v7.min.js"></script>
+    <style>
+        body { margin: 0; overflow: hidden; }
+        canvas { display: block; }
+        #info {
+            position: absolute;
+            top: 10px;
+            width: 100%;
+            text-align: center;
+            color: white;
+            font-family: Arial, sans-serif;
+        }
+        #controls {
+            position: absolute;
+            top: 40px;
+            left: 10px;
+            background: rgba(0,0,0,0.5);
+            padding: 10px;
+            border-radius: 5px;
+            color: white;
+            font-family: Arial, sans-serif;
+        }
+        #colorScale {
+            position: absolute;
+            top: 40px;
+            right: 10px;
+            background: rgba(0,0,0,0.5);
+            padding: 10px;
+            border-radius: 5px;
+            color: white;
+            font-family: Arial, sans-serif;
+            width: 150px;
+        }
+        .color-bar {
+            width: 100%;
+            height: 20px;
+            margin-bottom: 5px;
+            position: relative;
+        }
+        .color-bar-segment {
+            height: 100%;
+            position: absolute;
+        }
+        .color-legend {
+            display: flex;
+            justify-content: space-between;
+            font-size: 10px;
+            margin-top: 5px;
+        }
+        #datasets {
+            position: absolute;
+            top: 40px;
+            left: 50%;
+            transform: translateX(-50%);
+            background: rgba(0,0,0,0.5);
+            padding: 10px;
+            border-radius: 5px;
+            color: white;
+            font-family: Arial, sans-serif;
+        }
+        .dataset-label {
+            display: inline-block;
+            width: 12px;
+            height: 12px;
+            margin-right: 5px;
+            border: 1px solid white;
+        }
+    </style>
+</head>
+<body>
+    <div id="info">多方向等值线图显示</div>
+    <div id="controls">
+        <div><label><input type="checkbox" id="enableExtrusion" checked> 启用3D挤压效果</label></div>
+        <div><label><input type="checkbox" id="showContourLines" checked> 显示等值线轮廓</label></div>
+        <div>
+            <label>色阶选择: 
+                <select id="colormap">
+                    <option value="custom">自定义色阶</option>
+                    <option value="ylgnbu">D3 YlGnBu</option>
+                    <option value="viridis">Viridis</option>
+                    <option value="plasma">Plasma</option>
+                    <option value="turbo">Turbo</option>
+                </select>
+            </label>
+        </div>
+    </div>
+    <div id="datasets">
+        <span>等值线图:</span>
+        <div id="datasetLabels"></div>
+    </div>
+    <div id="colorScale">
+        <div>色阶</div>
+        <div id="colorBar" class="color-bar"></div>
+        <div class="color-legend">
+            <span id="minValue">0</span>
+            <span id="maxValue">270</span>
+        </div>
+    </div>
+    <div id="container"></div>
+    <script type="importmap">
+        {
+            "imports": {
+                "three": "../../build/three.module.js",
+                "three/addons/": "../../examples/jsm/"
+            }
+        }
+    </script>
+    <script type="module">
+        // ===== 导入Three.js模块 =====
+        import * as THREE from 'three';
+        import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+        
+        // ===== 配置参数 =====
+        const width = 800;
+        const height = 600;
+        const resolution = 256; // 纹理分辨率
+        
+        // ===== 控制参数 =====
+        let enableExtrusion = true; // 默认启用挤压效果
+        let showContourLines = true; // 显示等值线轮廓
+        let currentColormap = "custom"; // 当前使用的色阶
+        
+        // ===== 自定义色阶数据 =====
+        const colorScales = [
+            // 第一个等值线图色阶 - 蓝色系
+            [
+                [0, 'rgba(240,249,255,255)'],
+                [50, 'rgba(204,224,255,255)'],
+                [100, 'rgba(173,216,230,255)'],
+                [150, 'rgba(135,206,235,255)'],
+                [200, 'rgba(65,105,225,255)'],
+                [250, 'rgba(0,0,139,255)']
+            ],
+            // 第二个等值线图色阶 - 绿色系
+            [
+                [0, 'rgba(240,255,240,255)'],
+                [50, 'rgba(224,238,224,255)'],
+                [100, 'rgba(152,251,152,255)'],
+                [150, 'rgba(144,238,144,255)'],
+                [200, 'rgba(50,205,50,255)'],
+                [250, 'rgba(0,100,0,255)']
+            ],
+            // 第三个等值线图色阶 - 红色系
+            [
+                [0, 'rgba(255,240,240,255)'],
+                [50, 'rgba(255,228,225,255)'],
+                [100, 'rgba(255,182,193,255)'],
+                [150, 'rgba(255,105,180,255)'],
+                [200, 'rgba(220,20,60,255)'],
+                [250, 'rgba(139,0,0,255)']
+            ],
+            // 第四个等值线图色阶 - 黄色系
+            [
+                [0, 'rgba(255,255,240,255)'],
+                [50, 'rgba(255,255,224,255)'],
+                [100, 'rgba(255,250,205,255)'],
+                [150, 'rgba(255,255,0,255)'],
+                [200, 'rgba(218,165,32,255)'],
+                [250, 'rgba(184,134,11,255)']
+            ],
+            // 第五个等值线图色阶 - 紫色系
+            [
+                [0, 'rgba(252,240,255,255)'],
+                [50, 'rgba(238,224,255,255)'],
+                [100, 'rgba(216,191,216,255)'],
+                [150, 'rgba(221,160,221,255)'],
+                [200, 'rgba(186,85,211,255)'],
+                [250, 'rgba(75,0,130,255)']
+            ]
+        ];
+        
+        // ===== 预定义方向 =====
+        const orientations = [
+            { type: "z", name: "垂直Z轴", rotation: new THREE.Euler(0, 0, 0) },
+            { type: "x", name: "垂直X轴", rotation: new THREE.Euler(0, Math.PI/2, 0) },
+            { type: "y", name: "垂直Y轴", rotation: new THREE.Euler(Math.PI/2, 0, 0) },
+            { type: "diagonal", name: "对角线", rotation: new THREE.Euler(Math.PI/6, Math.PI/4, Math.PI/5) },
+            { type: "custom", name: "自定义角度", rotation: new THREE.Euler(Math.PI/8, -Math.PI/7, Math.PI/9) }
+        ];
+        
+        // ===== 辅助函数：解析RGBA字符串 =====
+        function parseRGBA(rgba) {
+            const match = rgba.match(/rgba\((\d+),(\d+),(\d+),(\d+)\)/);
+            if (match) {
+                return {
+                    r: parseInt(match[1]),
+                    g: parseInt(match[2]),
+                    b: parseInt(match[3]),
+                    a: parseInt(match[4]) / 255
+                };
+            }
+            return { r: 0, g: 0, b: 0, a: 1 };
+        }
+        
+        // ===== 根据自定义色阶创建D3颜色插值器 =====
+        function createCustomInterpolator(colorScale) {
+            // 提取值和颜色
+            const values = colorScale.map(d => d[0]);
+            const colors = colorScale.map(d => d[1]);
+            
+            // 创建自定义插值器函数
+            return (value) => {
+                // 找到适当的色阶段
+                for (let i = 0; i < values.length - 1; i++) {
+                    if (value >= values[i] && value <= values[i + 1]) {
+                        // 计算插值比例
+                        const t = (value - values[i]) / (values[i + 1] - values[i]);
+                        // 解析颜色
+                        const color1 = parseRGBA(colors[i]);
+                        const color2 = parseRGBA(colors[i + 1]);
+                        // 线性插值RGB值
+                        const r = Math.round(color1.r + t * (color2.r - color1.r));
+                        const g = Math.round(color1.g + t * (color2.g - color1.g));
+                        const b = Math.round(color1.b + t * (color2.b - color1.b));
+                        const a = color1.a + t * (color2.a - color1.a);
+                        
+                        return `rgb(${r}, ${g}, ${b})`;
+                    }
+                }
+                
+                // 如果值超出范围，返回最近的极值颜色
+                if (value < values[0]) return colors[0];
+                return colors[colors.length - 1];
+            };
+        }
+        
+        // ===== 渲染色阶条 =====
+        function renderColorBar(colorScale, minVal, maxVal) {
+            const colorBar = document.getElementById('colorBar');
+            colorBar.innerHTML = '';
+            
+            // 设置最小最大值标签
+            document.getElementById('minValue').textContent = minVal;
+            document.getElementById('maxValue').textContent = maxVal;
+            
+            if (currentColormap === "custom") {
+                // 自定义色阶条由多个段组成
+                const totalRange = maxVal - minVal;
+                
+                for (let i = 0; i < colorScale.length - 1; i++) {
+                    const segment = document.createElement('div');
+                    segment.className = 'color-bar-segment';
+                    
+                    const startVal = colorScale[i][0];
+                    const endVal = colorScale[i+1][0];
+                    const startColor = colorScale[i][1];
+                    
+                    // 计算段的相对位置和宽度
+                    const startPercent = ((startVal - minVal) / totalRange) * 100;
+                    const widthPercent = ((endVal - startVal) / totalRange) * 100;
+                    
+                    segment.style.left = startPercent + '%';
+                    segment.style.width = widthPercent + '%';
+                    segment.style.backgroundColor = startColor;
+                    
+                    colorBar.appendChild(segment);
+                }
+            } else {
+                // D3内置色阶
+                const gradient = [];
+                for (let i = 0; i <= 10; i++) {
+                    const t = i / 10;
+                    const color = getColorScaleForDataset((maxVal - minVal) * t + minVal, 0);
+                    gradient.push(`${color} ${i*10}%`);
+                }
+                
+                const segment = document.createElement('div');
+                segment.className = 'color-bar-segment';
+                segment.style.left = '0';
+                segment.style.width = '100%';
+                segment.style.background = `linear-gradient(to right, ${gradient.join(', ')})`;
+                
+                colorBar.appendChild(segment);
+            }
+        }
+        
+        // ===== 生成随机数据点（高斯分布）=====
+        function generateRandomData(n, mean, variance) {
+            return Array.from({ length: n }, () => {
+                return [
+                    mean[0] + d3.randomNormal(0, variance)(),
+                    mean[1] + d3.randomNormal(0, variance)()
+                ];
+            });
+        }
+
+        // ===== 生成等值线数据 =====
+        function generateContours(dataPoints, options = {}) {
+            const {
+                bandWidth = 20,
+                thresholds = 15,
+                size = [width, height]
+            } = options;
+            
+            // 创建密度计算器
+            const density = d3.contourDensity()
+                .x(d => d[0] * size[0])
+                .y(d => d[1] * size[1])
+                .size(size)
+                .bandwidth(bandWidth)
+                .thresholds(thresholds);
+
+            // 计算等值线
+            let contours = density(dataPoints);
+            
+            // 确保contours按值从小到大排序
+            contours.sort((a, b) => a.value - b.value);
+            
+            return contours;
+        }
+        
+        // ===== 创建多个交叉的等值线数据集 =====
+        function createMultipleCrossingContourDatasets(numDatasets = 5) {
+            const datasets = [];
+            
+            // 创建中心位置 - 确保等值线图会交叉
+            const centers = [
+                [0.3, 0.3],  // 左上
+                [0.7, 0.3],  // 右上
+                [0.5, 0.5],  // 中心
+                [0.3, 0.7],  // 左下
+                [0.7, 0.7]   // 右下
+            ];
+            
+            // 为每个数据集随机生成数据并创建等值线
+            for (let i = 0; i < numDatasets; i++) {
+                // 从特定中心点创建数据点
+                const mainPoints = generateRandomData(6000, centers[i], 0.1);
+                
+                // 添加一些共享点，确保交叉
+                const sharedPoints = generateRandomData(500, [0.5, 0.5], 0.2);
+                
+                // 合并所有数据点
+                const allPoints = [...mainPoints, ...sharedPoints];
+                
+                // 生成等值线数据
+                const options = {
+                    bandWidth: 15 + i * 2,        // 稍微不同的平滑度
+                    thresholds: 10 + i,           // 不同数量的等值线
+                };
+                
+                const contours = generateContours(allPoints, options);
+                
+                // 为数据集分配方向 - 使用预定义方向
+                const orientation = orientations[i % orientations.length];
+                
+                // 创建数据集
+                datasets.push({
+                    id: i,
+                    contours: contours,
+                    colorScale: colorScales[i % colorScales.length],
+                    zOffset: i * 0.05,  // Z轴偏移，使不同数据集在Z轴上错开
+                    visible: true,       // 默认显示
+                    color: getBaseColor(colorScales[i]), // 获取代表色
+                    orientation: orientation // 添加方向属性
+                });
+            }
+            
+            return datasets;
+        }
+        
+        // ===== 从色阶获取基础代表色 =====
+        function getBaseColor(colorScale) {
+            // 从色阶中间选择一个代表色
+            const middleIndex = Math.floor(colorScale.length / 2);
+            return colorScale[middleIndex][1];
+        }
+        
+        // ===== 为特定数据集获取颜色 =====
+        function getColorScaleForDataset(value, datasetIndex) {
+            const dataset = contourDatasets[datasetIndex];
+            const contours = dataset.contours;
+            const colorScale = dataset.colorScale;
+            
+            // 获取数据集的值范围
+            const minValue = d3.min(contours, d => d.value);
+            const maxValue = d3.max(contours, d => d.value);
+            
+            // 自定义色阶的值范围
+            const customMinValue = colorScale[0][0];
+            const customMaxValue = colorScale[colorScale.length - 1][0];
+            
+            // 归一化值并根据当前色阶模式返回颜色
+            const normalizedValue = (value - minValue) / (maxValue - minValue);
+            const scaledValue = normalizedValue * (customMaxValue - customMinValue) + customMinValue;
+            
+            switch (currentColormap) {
+                case "custom":
+                    return createCustomInterpolator(colorScale)(scaledValue);
+                case "ylgnbu":
+                    return d3.interpolateYlGnBu(normalizedValue);
+                case "viridis":
+                    return d3.interpolateViridis(normalizedValue);
+                case "plasma":
+                    return d3.interpolatePlasma(normalizedValue);
+                case "turbo":
+                    return d3.interpolateTurbo(normalizedValue);
+                default:
+                    return createCustomInterpolator(colorScale)(scaledValue);
+            }
+        }
+        
+        // ===== 点集简化函数 =====
+        function simplifyPoints(points, tolerance) {
+            if (points.length <= 2) return points;
+            
+            // 简单距离函数
+            const distSquared = (p1, p2) => {
+                const dx = p1[0] - p2[0];
+                const dy = p1[1] - p2[1];
+                return dx * dx + dy * dy;
+            };
+            
+            const result = [points[0]];
+            let lastPoint = points[0];
+            
+            for (let i = 1; i < points.length - 1; i++) {
+                if (distSquared(points[i], lastPoint) > tolerance * tolerance) {
+                    result.push(points[i]);
+                    lastPoint = points[i];
+                }
+            }
+            
+            result.push(points[points.length - 1]);
+            return result;
+        }
+        
+        // ===== 创建数据集标签，包含方向信息 =====
+        function createDatasetLabels(datasets) {
+            const container = document.getElementById('datasetLabels');
+            container.innerHTML = '';
+            
+            datasets.forEach((dataset, index) => {
+                const label = document.createElement('div');
+                label.style.display = 'inline-block';
+                label.style.margin = '5px';
+                
+                const colorBox = document.createElement('span');
+                colorBox.className = 'dataset-label';
+                colorBox.style.backgroundColor = dataset.color.replace('255)', '1)').replace('rgba', 'rgba');
+                colorBox.style.opacity = dataset.visible ? 1 : 0.3;
+                
+                const checkbox = document.createElement('input');
+                checkbox.type = 'checkbox';
+                checkbox.checked = dataset.visible;
+                checkbox.id = `dataset-${index}`;
+                checkbox.addEventListener('change', (e) => {
+                    dataset.visible = e.target.checked;
+                    colorBox.style.opacity = dataset.visible ? 1 : 0.3;
+                    updateScene();
+                });
+                
+                const text = document.createElement('label');
+                text.htmlFor = `dataset-${index}`;
+                text.textContent = `数据集 ${index + 1} (${dataset.orientation.name})`;
+                
+                label.appendChild(colorBox);
+                label.appendChild(checkbox);
+                label.appendChild(text);
+                
+                container.appendChild(label);
+            });
+        }
+        
+        // ===== 为等值线数据创建3D几何体 =====
+        function createContourGeometries(datasets, scene) {
+            // 保存所有等值线网格的引用，以便更新
+            const allContourMeshes = [];
+            
+            // 对每个可见的数据集处理
+            datasets.forEach((dataset, datasetIndex) => {
+                // 跳过不可见的数据集
+                if (!dataset.visible) return;
+                
+                const contours = dataset.contours;
+                const zBaseOffset = dataset.zOffset || 0;
+                const orientation = dataset.orientation;
+                
+                // 获取值范围
+                const minValue = d3.min(contours, d => d.value);
+                const maxValue = d3.max(contours, d => d.value);
+                
+                // 获取每个等值线的高度值
+                const heightScale = 0.05; // 整体高度比例
+                const layerGap = 0.002;   // 减小层间距
+                
+                // 为数据集创建一个组，以便统一应用旋转
+                const datasetGroup = new THREE.Group();
+                
+                // 按照值从小到大遍历，这样可以确保高值区域在上方
+                contours.forEach((contour, i) => {
+                    // 获取归一化高度值
+                    const normalizedValue = (contour.value - minValue) / (maxValue - minValue);
+                    const extrudeHeight = normalizedValue * heightScale;
+                    
+                    // 处理所有轮廓部分（contour可能包含多个分离的部分）
+                    contour.coordinates.forEach(polygon => {
+                        // 创建组，用于保存一个等值线及其轮廓线
+                        const contourGroup = new THREE.Group();
+                        
+                        // 创建形状
+                        const shape = new THREE.Shape();
+                        
+                        // 处理外环（第一个点集）
+                        const outerRing = simplifyPoints(polygon[0], 0.5);
+                        
+                        // 外环点集构建主形状
+                        outerRing.forEach((point, j) => {
+                            // 归一化坐标
+                            const x = (point[0] / width - 0.5) * aspectRatio;
+                            const y = -(point[1] / height - 0.5); // Y坐标反转
+                            
+                            if (j === 0) {
+                                shape.moveTo(x, y);
+                            } else {
+                                shape.lineTo(x, y);
+                            }
+                        });
+                        
+                        // 处理内环（如果有的话）- 这些是形状中的"孔"
+                        if (polygon.length > 1) {
+                            for (let h = 1; h < polygon.length; h++) {
+                                const holePoints = simplifyPoints(polygon[h], 0.5);
+                                const holePath = new THREE.Path();
+                                
+                                holePoints.forEach((point, j) => {
+                                    const x = (point[0] / width - 0.5) * aspectRatio;
+                                    const y = -(point[1] / height - 0.5);
+                                    
+                                    if (j === 0) {
+                                        holePath.moveTo(x, y);
+                                    } else {
+                                        holePath.lineTo(x, y);
+                                    }
+                                });
+                                
+                                shape.holes.push(holePath);
+                            }
+                        }
+                        
+                        // 根据挤压设置选择几何体
+                        let contourGeometry;
+                        if (enableExtrusion) {
+                            // 创建挤压几何体
+                            const extrudeSettings = {
+                                steps: 2,
+                                depth: extrudeHeight,
+                                bevelEnabled: false
+                            };
+                            contourGeometry = new THREE.ExtrudeGeometry(shape, extrudeSettings);
+                        } else {
+                            // 非挤压模式 - 使用平面几何体
+                            contourGeometry = new THREE.ShapeGeometry(shape);
+                        }
+                        
+                        // 创建材质 - 使用从色阶获取的颜色
+                        const contourMaterial = new THREE.MeshPhongMaterial({
+                            color: new THREE.Color(getColorScaleForDataset(contour.value, datasetIndex)),
+                            transparent: true, // 启用透明度以便看到交叉部分
+                            opacity: 0.75,     // 适当的透明度
+                            side: THREE.DoubleSide,
+                            depthWrite: true,
+                            depthTest: true,
+                            // 多边形偏移，避免Z-fighting
+                            polygonOffset: true,
+                            polygonOffsetFactor: datasetIndex,
+                            polygonOffsetUnits: 1
+                        });
+                        
+                        // 创建网格并添加到组中
+                        const contourMesh = new THREE.Mesh(contourGeometry, contourMaterial);
+                        
+                        // Z位置设置
+                        if (enableExtrusion) {
+                            // 挤压模式: 使用固定间隙
+                            contourMesh.position.z = Math.max(0.005, i * layerGap);
+                        } else {
+                            // 非挤压模式: 使用递增的Z值，确保渲染顺序正确
+                            contourMesh.position.z = 0.001 + (i * 0.0001);
+                        }
+                        
+                        // 设置明确的渲染顺序
+                        contourMesh.renderOrder = datasetIndex * 1000 + i; // 数据集索引影响渲染顺序
+                        contourMesh.userData = { datasetIndex: datasetIndex }; // 存储数据集索引
+                        
+                        // 添加到等值线组
+                        contourGroup.add(contourMesh);
+                        allContourMeshes.push(contourMesh);
+                        
+                        // 绘制轮廓线
+                        if (showContourLines) {
+                            // 创建线条几何体
+                            const points = [];
+                            
+                            // 添加外环轮廓线
+                            outerRing.forEach(point => {
+                                const x = (point[0] / width - 0.5) * aspectRatio;
+                                const y = -(point[1] / height - 0.5); 
+                                points.push(new THREE.Vector3(x, y, 0));
+                            });
+                            
+                            // 闭合路径
+                            if (points.length > 0) {
+                                const firstPoint = points[0];
+                                points.push(new THREE.Vector3(firstPoint.x, firstPoint.y, 0));
+                            }
+                            
+                            const lineGeometry = new THREE.BufferGeometry().setFromPoints(points);
+                            const lineMaterial = new THREE.LineBasicMaterial({ 
+                                color: 0x000000,
+                                linewidth: 2,
+                                transparent: true,
+                                opacity: 0.9,
+                                depthTest: true // 启用深度测试，确保与等值线面一起显示
+                            });
+                            
+                            const line = new THREE.Line(lineGeometry, lineMaterial);
+                            
+                            // 线的Z位置与等值线网格相同，只稍微偏移一点点避免Z-fighting
+                            if (enableExtrusion) {
+                                // 在挤压高度上添加一点点偏移，确保显示在表面
+                                line.position.z = contourMesh.position.z + extrudeHeight + 0.0001;
+                            } else {
+                                // 非挤压模式，稍微偏移Z值
+                                line.position.z = contourMesh.position.z + 0.0001;
+                            }
+                            
+                            // 线的渲染顺序高于所有面
+                            line.renderOrder = datasetIndex * 1000 + contours.length + i;
+                            line.userData = { datasetIndex: datasetIndex }; // 存储数据集索引
+                            
+                            // 添加到等值线组
+                            contourGroup.add(line);
+                            allContourMeshes.push(line);
+                            
+                            // 绘制内环轮廓线
+                            if (polygon.length > 1) {
+                                for (let h = 1; h < polygon.length; h++) {
+                                    const holePoints = simplifyPoints(polygon[h], 0.5);
+                                    let holeLinePoints = [];
+                                    
+                                    holePoints.forEach(point => {
+                                        const x = (point[0] / width - 0.5) * aspectRatio;
+                                        const y = -(point[1] / height - 0.5);
+                                        holeLinePoints.push(new THREE.Vector3(x, y, 0));
+                                    });
+                                    
+                                    // 闭合内环
+                                    if (holeLinePoints.length > 0) {
+                                        const firstHolePoint = holeLinePoints[0];
+                                        holeLinePoints.push(new THREE.Vector3(firstHolePoint.x, firstHolePoint.y, 0));
+                                    }
+                                    
+                                    const holeGeometry = new THREE.BufferGeometry().setFromPoints(holeLinePoints);
+                                    const holeLine = new THREE.Line(holeGeometry, lineMaterial);
+                                    
+                                    // 设置与外环轮廓线相同的Z位置
+                                    if (enableExtrusion) {
+                                        holeLine.position.z = contourMesh.position.z + extrudeHeight + 0.0001;
+                                    } else {
+                                        holeLine.position.z = contourMesh.position.z + 0.0001;
+                                    }
+                                    
+                                    holeLine.renderOrder = datasetIndex * 1000 + contours.length + i;
+                                    holeLine.userData = { datasetIndex: datasetIndex }; // 存储数据集索引
+                                    
+                                    // 添加到等值线组
+                                    contourGroup.add(holeLine);
+                                    allContourMeshes.push(holeLine);
+                                }
+                            }
+                        }
+                        
+                        // 将当前等值线组添加到数据集组
+                        datasetGroup.add(contourGroup);
+                    });
+                });
+                
+                // 应用数据集组的Z轴偏移
+                datasetGroup.position.z = zBaseOffset;
+                
+                // 应用方向旋转
+                datasetGroup.rotation.copy(orientation.rotation);
+                
+                // 将数据集组添加到场景
+                scene.add(datasetGroup);
+                allContourMeshes.push(datasetGroup);
+            });
+            
+            return allContourMeshes;
+        }
+        
+        // ===== 更新场景，重新创建等值线 =====
+        function updateScene() {
+            // 清除现有的等值线网格
+            contourMeshes.forEach(mesh => {
+                scene.remove(mesh);
+                if (mesh.geometry) mesh.geometry.dispose();
+                if (mesh.material) mesh.material.dispose();
+            });
+            contourMeshes.length = 0;
+            
+            // 创建新的等值线几何体
+            contourMeshes = createContourGeometries(contourDatasets, scene);
+        }
+        
+        // ===== 主程序部分 =====
+        
+        // 创建场景和渲染器
+        const scene = new THREE.Scene();
+        scene.background = new THREE.Color(0x222222); // 深色背景，方便观察
+        
+        // 设置摄像机
+        const camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 1000);
+        camera.position.set(0, 0, 1.5);
+        
+        const renderer = new THREE.WebGLRenderer({ 
+            antialias: true,
+            logarithmicDepthBuffer: true  // 启用对数深度缓冲解决Z-fighting
+        });
+        renderer.setPixelRatio(window.devicePixelRatio);
+        renderer.sortObjects = true;
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        document.getElementById('container').appendChild(renderer.domElement);
+        
+        // 添加轨道控制
+        const controls = new OrbitControls(camera, renderer.domElement);
+        controls.enableDamping = true;
+        controls.dampingFactor = 0.25;
+        
+        // 创建基础平面的几何体
+        const aspectRatio = width / height;
+        const planeGeometry = new THREE.PlaneGeometry(1 * aspectRatio, 1);
+        
+        // 创建5个交叉的等值线数据集
+        const contourDatasets = createMultipleCrossingContourDatasets(5);
+        
+        // 创建数据集标签
+        createDatasetLabels(contourDatasets);
+        
+        // 渲染初始色阶条 - 默认显示第一个数据集的色阶
+        renderColorBar(contourDatasets[0].colorScale, 
+                       contourDatasets[0].colorScale[0][0], 
+                       contourDatasets[0].colorScale[contourDatasets[0].colorScale.length - 1][0]);
+        
+        // 添加参考平面
+        const planeMaterial = new THREE.MeshBasicMaterial({ 
+            color: 0xaaaaaa,
+            side: THREE.DoubleSide,
+            transparent: true,
+            opacity: 0.2
+        });
+        
+        // 创建底部参考平面
+        const plane = new THREE.Mesh(planeGeometry, planeMaterial);
+        plane.position.z = -0.1; // 将底部平面向下移动
+        scene.add(plane);
+        
+        // 保存所有等值线网格的引用
+        let contourMeshes = [];
+        
+        // 初始创建等值线
+        contourMeshes = createContourGeometries(contourDatasets, scene);
+        
+        // 添加光源
+        const ambientLight = new THREE.AmbientLight(0xffffff, 0.6);
+        scene.add(ambientLight);
+        
+        const directionalLight = new THREE.DirectionalLight(0xffffff, 0.8);
+        directionalLight.position.set(1, 1, 1);
+        scene.add(directionalLight);
+        
+        // 添加坐标轴辅助
+        const axesHelper = new THREE.AxesHelper(0.5);
+        scene.add(axesHelper);
+        
+        // UI事件监听
+        document.getElementById('enableExtrusion').addEventListener('change', (event) => {
+            enableExtrusion = event.target.checked;
+            updateScene(); // 重新创建等值线
+        });
+        
+        document.getElementById('showContourLines').addEventListener('change', (event) => {
+            showContourLines = event.target.checked;
+            updateScene(); // 重新创建等值线
+        });
+        
+        document.getElementById('colormap').addEventListener('change', (event) => {
+            currentColormap = event.target.value;
+            
+            // 更新色阶条显示 - 使用当前显示的第一个数据集
+            const visibleDataset = contourDatasets.find(d => d.visible) || contourDatasets[0];
+            if (currentColormap === "custom") {
+                renderColorBar(visibleDataset.colorScale, 
+                              visibleDataset.colorScale[0][0], 
+                              visibleDataset.colorScale[visibleDataset.colorScale.length - 1][0]);
+            } else {
+                const minValue = d3.min(visibleDataset.contours, d => d.value);
+                const maxValue = d3.max(visibleDataset.contours, d => d.value);
+                renderColorBar(null, minValue, maxValue);
+            }
+            
+            updateScene(); // 重新创建等值线
+        });
+        
+        // 窗口大小调整处理
+        window.addEventListener('resize', () => {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        });
+        
+        // 动画循环
+        function animate() {
+            requestAnimationFrame(animate);
+            controls.update();
+            renderer.render(scene, camera);
+        }
+        
+        animate();
+    </script>
+</body>
+</html>
