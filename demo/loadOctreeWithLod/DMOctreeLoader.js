@@ -263,10 +263,16 @@ class DMOctreeLoader {
             
             // 决定当前LOD级别需要使用的最大深度
             // LOD 0为最低细节级别（使用最小深度），最高级别号码为最高细节
-            const targetDepth = Math.floor(level * (maxDepth / (this.lodLevels - 1 || 1)));
+            const targetDepth = level === 0 ? 1 : Math.floor(level * (maxDepth / (this.lodLevels - 1 || 1)));
             
             console.log(`创建LOD ${level}: 目标深度=${targetDepth}, 最大深度=${maxDepth}`);
             
+            // 为LOD级别0和1添加八个象限中心点，确保均匀分布
+            if (level <= 1) {
+                this.addCornerPoints(points, colors);
+            }
+            
+            // 正常提取点
             this.extractPointsForLOD(this.rootNode, points, colors, 0, targetDepth);
             
             if (points.length > 0) {
@@ -282,8 +288,115 @@ class DMOctreeLoader {
                 console.log(`创建了LOD ${level} 几何体，包含 ${points.length / 3} 个点`);
             } else {
                 console.warn(`LOD ${level} 没有提取到任何点`);
+                
+                // 如果是初始级别且没有点，添加模型中心点
+                if (level === 0) {
+                    this.createFallbackLOD(level);
+                }
             }
         }
+    }
+    
+    // 为低LOD级别添加八个象限的中心点
+    addCornerPoints(points, colors) {
+        const centerX = (this.bounds.min.x + this.bounds.max.x) / 2;
+        const centerY = (this.bounds.min.y + this.bounds.max.y) / 2;
+        const centerZ = (this.bounds.min.z + this.bounds.max.z) / 2;
+        
+        // 添加中心点
+        this.addPointWithColor(points, colors, centerX, centerY, centerZ, this.getAverageValue());
+        
+        // 添加八个象限的中心点
+        const offsetX = (this.bounds.max.x - this.bounds.min.x) / 4;
+        const offsetY = (this.bounds.max.y - this.bounds.min.y) / 4;
+        const offsetZ = (this.bounds.max.z - this.bounds.min.z) / 4;
+        
+        for (let i = 0; i < 8; i++) {
+            const x = centerX + ((i & 1) ? offsetX : -offsetX);
+            const y = centerY + ((i & 2) ? offsetY : -offsetY);
+            const z = centerZ + ((i & 4) ? offsetZ : -offsetZ);
+            
+            // 寻找最近的实际节点的值
+            const value = this.findNearestNodeValue(x, y, z);
+            this.addPointWithColor(points, colors, x, y, z, value);
+        }
+    }
+    
+    // 添加带颜色的点
+    addPointWithColor(points, colors, x, y, z, value) {
+        points.push(x, y, z);
+        const normalizedValue = this.normalizeValue(value);
+        const color = this.getColorFromValue(normalizedValue);
+        colors.push(color.r, color.g, color.b);
+    }
+    
+    // 计算平均值
+    getAverageValue() {
+        if (this.minValue === Number.MAX_VALUE || this.maxValue === Number.MIN_VALUE) {
+            return 0;
+        }
+        return (this.minValue + this.maxValue) / 2;
+    }
+    
+    // 寻找最近节点的值
+    findNearestNodeValue(x, y, z) {
+        const result = { distance: Number.MAX_VALUE, value: this.getAverageValue() };
+        this.findNearestNodeValueRecursive(this.rootNode, x, y, z, result);
+        return result.value;
+    }
+    
+    // 递归寻找最近节点
+    findNearestNodeValueRecursive(node, x, y, z, result) {
+        if (!node) return;
+        
+        // 计算节点中心
+        const centerX = node.x + node.size / 2;
+        const centerY = node.y + node.size / 2;
+        const centerZ = node.z + node.size / 2;
+        
+        // 计算距离
+        const dx = x - centerX;
+        const dy = y - centerY;
+        const dz = z - centerZ;
+        const distance = dx*dx + dy*dy + dz*dz;
+        
+        // 如果是叶子节点且更近，更新结果
+        if (node.isLeaf && node.value !== null && node.value !== undefined && distance < result.distance) {
+            result.distance = distance;
+            result.value = node.value;
+        }
+        
+        // 递归搜索子节点
+        for (let i = 0; i < 8; i++) {
+            if (node.children[i]) {
+                this.findNearestNodeValueRecursive(node.children[i], x, y, z, result);
+            }
+        }
+    }
+    
+    // 创建备选LOD
+    createFallbackLOD(level) {
+        const centerX = (this.bounds.min.x + this.bounds.max.x) / 2;
+        const centerY = (this.bounds.min.y + this.bounds.max.y) / 2;
+        const centerZ = (this.bounds.min.z + this.bounds.max.z) / 2;
+        
+        const points = [centerX, centerY, centerZ];
+        
+        // 使用平均值色彩
+        const normalizedValue = this.normalizeValue(this.getAverageValue());
+        const color = this.getColorFromValue(normalizedValue);
+        const colors = [color.r, color.g, color.b];
+        
+        const geometry = new THREE.BufferGeometry();
+        geometry.setAttribute('position', new THREE.Float32BufferAttribute(points, 3));
+        geometry.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
+        
+        const material = this.pointsMaterial.clone();
+        const pointsMesh = new THREE.Points(geometry, material);
+        pointsMesh.name = `LOD_${level}`;
+        this.lodMeshes.push(pointsMesh);
+        
+        console.log(`创建了LOD ${level} 备选几何体，使用模型中心点`);
     }
     
     // 根据LOD级别递归提取点
