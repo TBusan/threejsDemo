@@ -141,6 +141,12 @@ class DMOctreeLoader {
         const isLeaf = view.getUint8(offset) !== 0;
         offset += 1;
         
+        // 添加调试输出
+        if (isLeaf) {
+            const value = view.getFloat64(offset, true);
+            console.debug(`解析叶子节点: 位置(${x.toFixed(2)}, ${y.toFixed(2)}, ${z.toFixed(2)}), 大小=${size.toFixed(2)}, 值=${value}`);
+        }
+        
         const node = {
             isLeaf: isLeaf,
             children: [],
@@ -199,6 +205,21 @@ class DMOctreeLoader {
     createLODGeometries() {
         this.lodMeshes = [];
         
+        // 检查根节点
+        if (!this.rootNode) {
+            console.error("无法创建LOD几何体: 根节点为空");
+            return;
+        }
+        
+        // 调试输出根节点信息
+        console.debug("根节点信息:", {
+            position: {x: this.rootNode.x, y: this.rootNode.y, z: this.rootNode.z},
+            size: this.rootNode.size,
+            isLeaf: this.rootNode.isLeaf,
+            hasValue: this.rootNode.value !== null && this.rootNode.value !== undefined,
+            childrenCount: this.rootNode.children.filter(c => c !== null).length
+        });
+
         // 对每个LOD级别提取点
         for (let level = 0; level < this.lodLevels; level++) {
             const points = [];
@@ -227,6 +248,11 @@ class DMOctreeLoader {
     extractPointsForLOD(node, points, colors, currentDepth, maxDepth) {
         if (!node) return;
         
+        // 添加调试信息
+        if (currentDepth === 0) {
+            console.debug(`开始为LOD ${maxDepth} 提取点...`);
+        }
+        
         if (node.isLeaf || currentDepth >= maxDepth) {
             // 到达LOD级别或叶子节点，添加点
             if (node.value !== undefined && node.value !== null) {
@@ -235,8 +261,13 @@ class DMOctreeLoader {
                 const centerY = node.y + node.size/2;
                 const centerZ = node.z + node.size/2;
                 
+                // 输出一些节点值进行调试
+                if (points.length === 0) {
+                    console.debug(`添加第一个点 位置=(${centerX}, ${centerY}, ${centerZ}), 值=${node.value}`);
+                }
+                
                 // 根据值生成颜色
-                // 这里的范围需要调整为与你的数据匹配
+                // 调整为适合实际数据的范围
                 const normalizedValue = this.normalizeValue(node.value);
                 const color = this.getColorFromValue(normalizedValue);
                 
@@ -256,11 +287,52 @@ class DMOctreeLoader {
     
     // 归一化值到0-1范围
     normalizeValue(value) {
-        // 根据你的数据范围调整这个函数
-        // 示例假设数据范围在-200到200之间
-        const min = -200;
-        const max = 200;
-        return Math.max(0, Math.min(1, (value - min) / (max - min)));
+        // 调整为适合实际数据的范围
+        // 移除固定范围，使用自动检测的最大最小值
+        const dataRange = this.getDataRange();
+        const min = dataRange.min;
+        const max = dataRange.max;
+        
+        console.debug(`归一化值: ${value}, 范围=[${min}, ${max}]`);
+        return Math.max(0, Math.min(1, (value - min) / (max - min || 1)));
+    }
+    
+    // 获取数据范围 - 新增方法
+    getDataRange() {
+        // 默认范围
+        let min = Number.MAX_VALUE;
+        let max = Number.MIN_VALUE;
+        
+        // 递归遍历所有节点找出值的范围
+        const findMinMax = (node) => {
+            if (!node) return;
+            
+            if (node.isLeaf && node.value !== null && node.value !== undefined) {
+                min = Math.min(min, node.value);
+                max = Math.max(max, node.value);
+            }
+            
+            // 继续遍历子节点
+            for (let i = 0; i < 8; i++) {
+                if (node.children[i]) {
+                    findMinMax(node.children[i]);
+                }
+            }
+        };
+        
+        // 开始从根节点遍历
+        findMinMax(this.rootNode);
+        
+        // 如果没有找到有效数据，使用默认范围
+        if (min === Number.MAX_VALUE || max === Number.MIN_VALUE) {
+            min = -100;
+            max = 100;
+            console.warn(`未找到有效的数据范围，使用默认范围: [${min}, ${max}]`);
+        } else {
+            console.log(`检测到数据范围: [${min}, ${max}]`);
+        }
+        
+        return { min, max };
     }
     
     // 根据归一化值生成颜色
