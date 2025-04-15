@@ -1,6 +1,7 @@
 import numpy as np
 import struct
 import os
+import time
 
 class OctreeNode:
     def __init__(self, x_min, y_min, z_min, size):
@@ -32,10 +33,20 @@ class OctreeNode:
         # 添加最大深度控制，确保有足够的LOD层级
         # 降低默认最小尺寸，确保更细致的分割
         
+        # 调试输出
+        global insert_calls, split_decisions
+        insert_calls += 1
+        
+        # 强制进行分裂用于测试
+        if self.depth < max_depth and self.size > min_size * 2:  # 确保至少分裂到指定的最小尺寸
+            force_split = True
+        else:
+            force_split = False
+            
         # 如果这个节点已经是叶子节点
         if self.is_leaf:
             # 如果值相同，不需要分裂
-            if abs(self.value - value) < 1e-6:
+            if abs(self.value - value) < 1e-6 and not force_split:
                 return
             else:
                 # 需要分裂并转移现有值
@@ -44,8 +55,12 @@ class OctreeNode:
                 self.is_leaf = False
                 self.value = None
                 
+                # 记录分裂决策
+                split_decisions += 1
+                
                 # 仅当我们高于最小尺寸且未达到最大深度时才分裂
-                if self.size > min_size and self.depth < max_depth:
+                if (self.size > min_size and self.depth < max_depth) or force_split:
+                    print(f"分裂节点: 深度={self.depth}, 大小={self.size:.2f}, 最小需求={min_size:.2f}, 最大深度={max_depth}")
                     # 为现有值创建子节点
                     self.insert(old_x, old_y, old_z, old_value, min_size, max_depth)
                     # 为新值创建子节点
@@ -57,7 +72,7 @@ class OctreeNode:
                 return
         
         # 如果达到最小尺寸或最大深度，设为叶子节点
-        if self.size <= min_size or self.depth >= max_depth:
+        if (self.size <= min_size or self.depth >= max_depth) and not force_split:
             self.value = value
             self.is_leaf = True
             return
@@ -106,6 +121,8 @@ class OctreeNode:
 leaf_count = 0
 written_nodes = 0
 depth_distribution = {}  # 添加深度分布统计
+insert_calls = 0  # 记录insert被调用的次数
+split_decisions = 0  # 记录分裂决策的次数
 
 def write_octree_to_binary(node, file):
     global written_nodes
@@ -208,7 +225,12 @@ def count_leaves_by_depth(node, stats=None, depth=0):
     return stats
 
 def build_octree(data, min_size=0.5, max_depth=8):
-    global leaf_count
+    global leaf_count, insert_calls, split_decisions
+    insert_calls = 0
+    split_decisions = 0
+    
+    start_time = time.time()
+    
     # Find the bounding box
     x_min, y_min, z_min = data[:, 0].min(), data[:, 1].min(), data[:, 2].min()
     x_max, y_max, z_max = data[:, 0].max(), data[:, 1].max(), data[:, 2].max()
@@ -236,12 +258,18 @@ def build_octree(data, min_size=0.5, max_depth=8):
         if idx % 10000 == 0:
             print(f"已插入 {idx+1}/{len(data)} 个点")
     
+    end_time = time.time()
+    build_time = end_time - start_time
+    
     # 验证八叉树结构
     total_leaves = count_leaves(root)
     depth_stats = count_leaves_by_depth(root)
     
     print(f"八叉树构建完成: 总计 {total_leaves} 个叶子节点")
     print(f"深度分布: {depth_stats}")
+    print(f"构建时间: {build_time:.2f} 秒")
+    print(f"Insert调用次数: {insert_calls}")
+    print(f"分裂决策次数: {split_decisions}")
     
     return root
 
@@ -266,6 +294,22 @@ def verify_octree(node, depth=0):
     
     return valid, total_nodes, valid_leaves
 
+def get_max_depth(node, current_depth=0):
+    """获取八叉树的最大深度"""
+    if node is None:
+        return current_depth
+    
+    if node.is_leaf:
+        return current_depth
+    
+    max_child_depth = current_depth
+    for child in node.children:
+        if child is not None:
+            child_depth = get_max_depth(child, current_depth + 1)
+            max_child_depth = max(max_child_depth, child_depth)
+    
+    return max_child_depth
+
 def convert_hsp_to_dm(hsp_filename, dm_filename, min_size=0.5, max_depth=8):
     global written_nodes, depth_distribution
     written_nodes = 0
@@ -279,12 +323,17 @@ def convert_hsp_to_dm(hsp_filename, dm_filename, min_size=0.5, max_depth=8):
         return
     
     print(f"正在构建八叉树 (共 {len(data)} 个点)...")
+    print(f"使用参数: min_size={min_size}, max_depth={max_depth}")
     octree = build_octree(data, min_size, max_depth)
     
     # 验证八叉树
     valid, total_nodes, valid_leaves = verify_octree(octree)
     print(f"八叉树验证结果: {'有效' if valid else '无效'}")
     print(f"总节点数: {total_nodes}, 有效叶子节点数: {valid_leaves}")
+    
+    # 检查实际最大深度
+    actual_max_depth = get_max_depth(octree)
+    print(f"八叉树实际最大深度: {actual_max_depth} (设置的最大深度为: {max_depth})")
     
     if not valid or valid_leaves == 0:
         print("警告: 八叉树结构可能有问题，没有有效的叶子节点")
@@ -318,6 +367,8 @@ def convert_hsp_to_dm(hsp_filename, dm_filename, min_size=0.5, max_depth=8):
     # 显示文件大小
     file_size = os.path.getsize(dm_filename)
     print(f"文件大小: {file_size / (1024*1024):.2f} MB")
+    
+    return total_nodes, depth_distribution
 
 if __name__ == "__main__":
     import sys
@@ -326,12 +377,17 @@ if __name__ == "__main__":
         print("用法: python main.py input.hsp output.dm [min_size] [max_depth]")
         hsp_file = input("请输入.hsp文件的路径: ")
         dm_file = input("请输入输出.dm文件的路径: ")
-        min_size = float(input("请输入最小节点尺寸 (默认: 0.5): ") or "0.5")
-        max_depth = int(input("请输入最大深度 (默认: 8): ") or "8")
+        min_size_str = input("请输入最小节点尺寸 (默认: 0.5): ").strip()
+        min_size = float(min_size_str) if min_size_str else 0.5
+        max_depth_str = input("请输入最大深度 (默认: 8): ").strip()
+        max_depth = int(max_depth_str) if max_depth_str else 8
     else:
         hsp_file = sys.argv[1]
         dm_file = sys.argv[2]
         min_size = float(sys.argv[3]) if len(sys.argv) > 3 else 0.5
         max_depth = int(sys.argv[4]) if len(sys.argv) > 4 else 8
     
+    # 尝试不同参数测试变化
+    print("\n==========================================")
+    print(f"使用参数 min_size={min_size}, max_depth={max_depth} 生成八叉树")
     convert_hsp_to_dm(hsp_file, dm_file, min_size, max_depth)
