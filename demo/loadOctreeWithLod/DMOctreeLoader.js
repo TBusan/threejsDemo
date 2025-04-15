@@ -24,6 +24,9 @@ class DMOctreeLoader {
         this.allNodes = [];
         // 存储预先生成的LOD数据
         this.precomputedLOD = [];
+        // 视锥剔除功能
+        this.frustumCullingEnabled = true;
+        this.visibleNodes = {};
     }
 
     // 加载DM格式文件
@@ -730,9 +733,170 @@ class DMOctreeLoader {
         return this.lodMeshes.length - 1 - level; // 反转，使近距离是最高精度
     }
     
-    // 更新LOD显示
+    // 添加视锥剔除功能
+    performFrustumCulling(camera) {
+        if (!this.frustumCullingEnabled) return;
+
+        // 创建视锥对象
+        const frustum = new THREE.Frustum();
+        const projScreenMatrix = new THREE.Matrix4();
+        
+        // 计算视锥体
+        projScreenMatrix.multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse);
+        frustum.setFromProjectionMatrix(projScreenMatrix);
+        
+        // 为每个LOD级别执行视锥剔除
+        this.visibleNodes = {};
+        
+        // 检查LOD节点是否在视锥内
+        for (let level = 0; level < this.lodMeshes.length; level++) {
+            if (!this.lodMeshes[level]) continue;
+            
+            const mesh = this.lodMeshes[level];
+            const geometry = mesh.geometry;
+            const positions = geometry.attributes.position;
+            const count = positions.count;
+            
+            if (!this.visibleNodes[level]) {
+                this.visibleNodes[level] = new Set();
+            }
+            
+            // 获取当前LOD级别的点
+            const nodes = this.precomputedLOD && this.precomputedLOD[level] ? 
+                this.precomputedLOD[level] : 
+                (level < this.allNodes.length ? this.allNodes.filter(n => n.depth <= level) : []);
+            
+            if (nodes.length === 0) continue;
+            
+            // 为每组点使用八叉树节点边界进行快速剔除
+            const groups = this.groupNodesByRegion(nodes);
+            
+            for (const [regionKey, nodeGroup] of Object.entries(groups)) {
+                // 计算该组节点的边界球
+                const boundingSphere = this.calculateBoundingSphere(nodeGroup);
+                
+                // 检查边界球是否在视锥体内
+                if (frustum.intersectsSphere(boundingSphere)) {
+                    // 如果在，添加所有节点索引
+                    for (const node of nodeGroup) {
+                        const index = nodes.indexOf(node);
+                        if (index >= 0 && index < count) {
+                            this.visibleNodes[level].add(index);
+                        }
+                    }
+                }
+            }
+            
+            console.log(`LOD ${level}: ${this.visibleNodes[level].size}/${count} 个点在视锥内`);
+        }
+    }
+    
+    // 按区域分组节点，用于加速视锥剔除
+    groupNodesByRegion(nodes, divisionSize = 4) {
+        const groups = {};
+        const bounds = this.bounds;
+        const sizeX = bounds.max.x - bounds.min.x;
+        const sizeY = bounds.max.y - bounds.min.y;
+        const sizeZ = bounds.max.z - bounds.min.z;
+        const cellSizeX = sizeX / divisionSize;
+        const cellSizeY = sizeY / divisionSize;
+        const cellSizeZ = sizeZ / divisionSize;
+        
+        for (const node of nodes) {
+            // 确定节点所在的空间区域
+            const x = Math.floor((node.position.x - bounds.min.x) / cellSizeX);
+            const y = Math.floor((node.position.y - bounds.min.y) / cellSizeY);
+            const z = Math.floor((node.position.z - bounds.min.z) / cellSizeZ);
+            
+            // 区域key
+            const regionKey = `${x},${y},${z}`;
+            
+            if (!groups[regionKey]) {
+                groups[regionKey] = [];
+            }
+            
+            groups[regionKey].push(node);
+        }
+        
+        return groups;
+    }
+    
+    // 计算一组节点的边界球
+    calculateBoundingSphere(nodes) {
+        if (nodes.length === 0) {
+            return new THREE.Sphere(new THREE.Vector3(), 0);
+        }
+        
+        // 找出中心点
+        let centerX = 0, centerY = 0, centerZ = 0;
+        for (const node of nodes) {
+            centerX += node.position.x;
+            centerY += node.position.y;
+            centerZ += node.position.z;
+        }
+        
+        centerX /= nodes.length;
+        centerY /= nodes.length;
+        centerZ /= nodes.length;
+        
+        // 找出最远距离作为半径
+        let maxDistSq = 0;
+        for (const node of nodes) {
+            const dx = node.position.x - centerX;
+            const dy = node.position.y - centerY;
+            const dz = node.position.z - centerZ;
+            const distSq = dx*dx + dy*dy + dz*dz;
+            maxDistSq = Math.max(maxDistSq, distSq);
+        }
+        
+        return new THREE.Sphere(
+            new THREE.Vector3(centerX, centerY, centerZ),
+            Math.sqrt(maxDistSq)
+        );
+    }
+    
+    // 应用视锥剔除结果到几何体上
+    applyFrustumCulling(scene) {
+        if (!this.frustumCullingEnabled || !this.visibleNodes) return;
+        
+        for (let level = 0; level < this.lodMeshes.length; level++) {
+            const mesh = this.lodMeshes[level];
+            if (!mesh || !scene.children.includes(mesh)) continue;
+            
+            const visibleIndices = this.visibleNodes[level];
+            if (!visibleIndices || visibleIndices.size === 0) continue;
+            
+            const geometry = mesh.geometry;
+            const positions = geometry.attributes.position;
+            const colors = geometry.attributes.color;
+            
+            // 使用点隐藏而不是完全重建几何体可以提高性能
+            // 通过将不可见点移到远离相机的位置来"隐藏"它们
+            const posArray = positions.array;
+            
+            for (let i = 0; i < positions.count; i++) {
+                const idx = i * 3;
+                const visible = visibleIndices.has(i);
+                
+                if (!visible) {
+                    // 将点移到非常远的地方，实际上是"隐藏"它
+                    posArray[idx] = 1e10;
+                    posArray[idx+1] = 1e10;
+                    posArray[idx+2] = 1e10;
+                }
+            }
+            
+            // 更新几何体
+            positions.needsUpdate = true;
+        }
+    }
+
+    // 更新LOD显示，包含视锥剔除
     updateLOD(camera, scene, boundingRadius) {
         if (!this.lodMeshes || this.lodMeshes.length === 0) return;
+        
+        // 执行视锥剔除
+        this.performFrustumCulling(camera);
         
         // 获取当前应显示的LOD级别
         const currentLevel = this.getLODLevelForDistance(camera, boundingRadius);
@@ -743,9 +907,14 @@ class DMOctreeLoader {
             if (scene.children.includes(mesh)) {
                 if (i !== currentLevel) {
                     scene.remove(mesh);
+                } else {
+                    // 应用视锥剔除
+                    this.applyFrustumCulling(scene);
                 }
             } else if (i === currentLevel) {
                 scene.add(mesh);
+                // 应用视锥剔除
+                this.applyFrustumCulling(scene);
             }
         }
     }
@@ -837,7 +1006,7 @@ export function loadAndDisplayDMOctree(url, scene, camera, renderer, controls) {
         function animate() {
             requestAnimationFrame(animate);
             
-            // 在每一帧更新LOD
+            // 在每一帧更新LOD和视锥剔除
             loader.updateLOD(camera, scene, boundingRadius);
             
             if (controls) controls.update();
