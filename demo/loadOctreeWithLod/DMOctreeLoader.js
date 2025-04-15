@@ -27,6 +27,7 @@ class DMOctreeLoader {
         // 视锥剔除功能
         this.frustumCullingEnabled = true;
         this.visibleNodes = {};
+        this._lastLODLevel = undefined;
     }
 
     // 加载DM格式文件
@@ -129,7 +130,7 @@ class DMOctreeLoader {
         if (version === 1) {
             // 版本1: 只有根节点偏移量
             rootOffset = view.getBigUint64(offset, true);
-            offset = Number(rootOffset);
+        offset = Number(rootOffset);
             console.log("版本1 - 根节点偏移量:", rootOffset);
         } else if (version === 2) {
             // 版本2: 有LOD数据偏移量和根节点偏移量
@@ -429,66 +430,76 @@ class DMOctreeLoader {
             console.log(`  深度 ${depth}: ${nodesByDepth[depth].length} 个节点`);
         });
         
-        // 生成累积的节点集合，确保高LOD包含所有低LOD的点
-        const cumulativeNodes = {};
-        let previousNodes = [];
-        
         // 对每个LOD级别创建几何体
         for (let level = 0; level < this.lodLevels; level++) {
             // 计算当前LOD级别对应的最大深度
-            // 确保较低的LOD使用较浅的深度，较高的LOD使用较深的深度
             const depthThreshold = Math.floor((level * maxDepth) / (this.lodLevels - 1));
             
-            console.log(`创建LOD ${level}: 使用深度 <= ${depthThreshold} 的节点`);
+            console.log(`创建LOD ${level}: 使用深度 = ${depthThreshold} 的节点`);
             
-            // 选择当前LOD级别的节点
+            // 选择当前LOD级别的节点 - 只使用当前深度的节点，不累积
             let currentLevelNodes = [];
             
             // 为LOD 0特殊处理，确保包含八个象限的代表点
             if (level === 0) {
                 currentLevelNodes = this.selectCornerNodes();
+                console.log(`LOD ${level} (特殊级别): 使用 ${currentLevelNodes.length} 个代表点`);
             } else {
-                // 为其他级别选择节点
-                for (let depth = 0; depth <= depthThreshold; depth++) {
-                    if (nodesByDepth[depth]) {
-                        // 采样当前深度的节点，确保点数随LOD级别增加
-                        // 对于较低的LOD级别，需要更少的点
-                        const samplingFactor = level === 1 ? 0.1 : 
-                                             level === 2 ? 0.2 : 
-                                             level === 3 ? 0.3 : 1.0;
-                        
-                        const sampled = this.sampleNodes(nodesByDepth[depth], samplingFactor);
-                        currentLevelNodes = currentLevelNodes.concat(sampled);
+                // 直接获取当前深度的所有节点
+                const exactDepth = depthThreshold;
+                
+                if (nodesByDepth[exactDepth]) {
+                    currentLevelNodes = nodesByDepth[exactDepth];
+                    console.log(`LOD ${level}: 使用深度 ${exactDepth} 的 ${currentLevelNodes.length} 个节点`);
+                } else {
+                    console.warn(`LOD ${level}: 深度 ${exactDepth} 没有节点，尝试查找最近的深度`);
+                    
+                    // 找到存在节点的最近深度
+                    let closestDepth = null;
+                    let minDiff = Number.MAX_VALUE;
+                    
+                    for (const depth in nodesByDepth) {
+                        const diff = Math.abs(parseInt(depth) - exactDepth);
+                        if (diff < minDiff && nodesByDepth[depth].length > 0) {
+                            minDiff = diff;
+                            closestDepth = parseInt(depth);
+                        }
+                    }
+                    
+                    if (closestDepth !== null) {
+                        currentLevelNodes = nodesByDepth[closestDepth];
+                        console.log(`LOD ${level}: 使用最近的深度 ${closestDepth} 的 ${currentLevelNodes.length} 个节点`);
                     }
                 }
             }
             
-            // 合并当前级别和之前级别的所有节点，确保高LOD包含所有低LOD的点
-            cumulativeNodes[level] = [...previousNodes, ...currentLevelNodes];
-            previousNodes = cumulativeNodes[level];
-            
-            this.createGeometryForLOD(level, cumulativeNodes[level]);
+            // 为该LOD级别创建几何体 - 直接使用当前级别的节点，不累积
+            if (currentLevelNodes.length > 0) {
+                this.createGeometryForLOD(level, currentLevelNodes);
+            } else {
+                console.warn(`LOD ${level}: 未找到合适的节点，创建备用几何体`);
+                this.createFallbackLOD(level);
+            }
         }
     }
     
     // 从预计算的LOD数据创建几何体
     createLODFromPrecomputed() {
         // 处理预计算的LOD数据
-        const cumulativeNodes = {};
-        let previousNodes = [];
+        console.log("使用预计算的LOD数据创建几何体，不进行累积");
         
         // 确保LOD级别从0开始且连续
         for (let level = 0; level < this.precomputedLOD.length; level++) {
-            if (!this.precomputedLOD[level]) continue;
+            if (!this.precomputedLOD[level]) {
+                console.warn(`LOD ${level}: 没有预计算数据，跳过`);
+                continue;
+            }
             
             const currentLevelNodes = this.precomputedLOD[level];
-            console.log(`LOD ${level}: 有 ${currentLevelNodes.length} 个预计算点`);
+            console.log(`LOD ${level}: 使用 ${currentLevelNodes.length} 个预计算点，完全按照DM文件中的定义`);
             
-            // 合并当前级别和之前级别的所有节点，确保高LOD包含所有低LOD的点
-            cumulativeNodes[level] = [...previousNodes, ...currentLevelNodes];
-            previousNodes = cumulativeNodes[level];
-            
-            this.createGeometryForLOD(level, cumulativeNodes[level]);
+            // 直接使用当前级别的节点创建几何体，不进行累积
+            this.createGeometryForLOD(level, currentLevelNodes);
         }
     }
     
@@ -504,9 +515,9 @@ class DMOctreeLoader {
             return;
         }
         
-        const points = [];
-        const colors = [];
-        
+            const points = [];
+            const colors = [];
+            
         for (const node of nodes) {
             // 添加节点位置和颜色
             points.push(node.position.x, node.position.y, node.position.z);
@@ -517,16 +528,16 @@ class DMOctreeLoader {
             colors.push(color.r, color.g, color.b);
         }
         
-        const geometry = new THREE.BufferGeometry();
-        geometry.setAttribute('position', new THREE.Float32BufferAttribute(points, 3));
-        geometry.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
-        
-        const material = this.pointsMaterial.clone();
-        const pointsMesh = new THREE.Points(geometry, material);
-        pointsMesh.name = `LOD_${level}`;
-        this.lodMeshes.push(pointsMesh);
-        
-        console.log(`创建了LOD ${level} 几何体，包含 ${points.length / 3} 个点`);
+                const geometry = new THREE.BufferGeometry();
+                geometry.setAttribute('position', new THREE.Float32BufferAttribute(points, 3));
+                geometry.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
+                
+                const material = this.pointsMaterial.clone();
+                const pointsMesh = new THREE.Points(geometry, material);
+                pointsMesh.name = `LOD_${level}`;
+                this.lodMeshes.push(pointsMesh);
+                
+                console.log(`创建了LOD ${level} 几何体，包含 ${points.length / 3} 个点`);
     }
     
     // 选择八个象限和中心的代表点，用于最低级别的LOD
@@ -548,7 +559,7 @@ class DMOctreeLoader {
         let centerNode = this.findNearestNode(centerX, centerY, centerZ);
         if (centerNode) {
             cornerNodes.push(centerNode);
-        } else {
+            } else {
             // 如果找不到最近的节点，创建一个虚拟中心节点
             cornerNodes.push({
                 position: { x: centerX, y: centerY, z: centerZ },
@@ -716,26 +727,98 @@ class DMOctreeLoader {
     
     // 获取适合当前相机距离的LOD级别
     getLODLevelForDistance(camera, boundingRadius) {
-        // 计算相机到场景中心的距离
+        if (!camera) {
+            console.warn("未提供相机对象，无法计算LOD级别");
+            return this._lastLODLevel !== undefined ? this._lastLODLevel : 0;
+        }
+
+        // 使用实际边界而不是文件边界
+        const bounds = this.actualBounds || this.bounds;
+        
+        // 计算相机到数据边界框中心的距离
         const cameraPosition = new THREE.Vector3().copy(camera.position);
-        const sceneCenter = new THREE.Vector3(
-            (this.bounds.min.x + this.bounds.max.x) / 2,
-            (this.bounds.min.y + this.bounds.max.y) / 2,
-            (this.bounds.min.z + this.bounds.max.z) / 2
+        const boundingBoxCenter = new THREE.Vector3(
+            (bounds.min.x + bounds.max.x) / 2,
+            (bounds.min.y + bounds.max.y) / 2,
+            (bounds.min.z + bounds.max.z) / 2
         );
         
-        const distance = cameraPosition.distanceTo(sceneCenter);
+        // 计算相机实际距离，考虑相机的缩放因子和视锥体
+        // 1. 相机到中心的直线距离
+        const distance = cameraPosition.distanceTo(boundingBoxCenter);
         
-        // 根据距离选择LOD级别
-        const normalizedDistance = Math.min(distance / (boundingRadius * 3), 1);
-        const level = Math.floor(normalizedDistance * (this.lodMeshes.length - 1));
+        // 2. 考虑相机的朝向 - 计算相机视线方向上的投影距离
+        const lookDirection = new THREE.Vector3(0, 0, -1).applyQuaternion(camera.quaternion);
+        const centerToCamera = new THREE.Vector3().subVectors(cameraPosition, boundingBoxCenter);
+        const projectedDistance = Math.abs(centerToCamera.dot(lookDirection));
         
-        return this.lodMeshes.length - 1 - level; // 反转，使近距离是最高精度
+        // 结合两种距离，确保在任何角度都能正确计算LOD
+        const effectiveDistance = Math.min(distance, projectedDistance);
+        
+        // 添加相机的缩放因子影响
+        // 检查是否有缩放属性，某些控制器可能会修改相机的zoom属性
+        const zoomFactor = camera.zoom !== undefined ? 1 / camera.zoom : 1;
+        
+        // 计算数据的对角线长度，作为参考尺度
+        const diagonalLength = Math.sqrt(
+            Math.pow(bounds.max.x - bounds.min.x, 2) +
+            Math.pow(bounds.max.y - bounds.min.y, 2) +
+            Math.pow(bounds.max.z - bounds.min.z, 2)
+        );
+        
+        // 调整距离，考虑缩放因子
+        const adjustedDistance = effectiveDistance * zoomFactor;
+        
+        // 定义各LOD级别的距离阈值 - 使用线性映射，确保距离增加时LOD级别减少
+        const maxLevels = this.lodMeshes.length;
+        if (maxLevels <= 1) return 0;
+        
+        // 计算基础距离单位和最大距离
+        const baseDistance = diagonalLength * 0.25;  // 基础单位距离
+        const maxDistance = baseDistance * 8;        // 最大考虑距离
+        
+        // 规范化距离，超过最大距离则视为最远
+        const normalizedDistance = Math.min(adjustedDistance, maxDistance) / maxDistance;
+        
+        // 计算LOD级别：近距离 → 高LOD(大值)，远距离 → 低LOD(小值)
+        // 使用反向映射：normalizedDistance接近0(近)时得到maxLevels-1，接近1(远)时得到0
+        let newLevel = Math.floor((1 - normalizedDistance) * (maxLevels - 1));
+        
+        // 确保LOD级别在合法范围内
+        newLevel = Math.max(0, Math.min(maxLevels - 1, newLevel));
+        
+        // 添加滞后逻辑避免频繁切换
+        if (this._lastLODLevel !== undefined) {
+            const hysteresis = 0.1; // 滞后因子
+            const levelDiff = newLevel - this._lastLODLevel;
+            
+            if (Math.abs(levelDiff) <= hysteresis) {
+                // 小变化，保持当前级别
+                newLevel = this._lastLODLevel;
+            } else if (Math.abs(levelDiff) > 1) {
+                // 限制大变化
+                newLevel = this._lastLODLevel + (levelDiff > 0 ? 1 : -1);
+            }
+        }
+        
+        // 调试输出，帮助诊断LOD选择问题
+        if (newLevel !== this._lastLODLevel) {
+            console.log(`LOD更新: ${this._lastLODLevel} → ${newLevel}, 距离=${adjustedDistance.toFixed(2)}, 比例=${normalizedDistance.toFixed(2)}`);
+        }
+        
+        // 更新历史记录
+        this._lastLODLevel = newLevel;
+        
+        return newLevel;
     }
     
     // 添加视锥剔除功能
     performFrustumCulling(camera) {
         if (!this.frustumCullingEnabled) return;
+        
+        // 仅处理当前LOD级别，减少不必要的计算
+        const currentLevel = this._lastLODLevel !== undefined ? this._lastLODLevel : 0;
+        if (!this.lodMeshes[currentLevel]) return;
 
         // 创建视锥对象
         const frustum = new THREE.Frustum();
@@ -745,80 +828,65 @@ class DMOctreeLoader {
         projScreenMatrix.multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse);
         frustum.setFromProjectionMatrix(projScreenMatrix);
         
-        // 为每个LOD级别执行视锥剔除
+        // 清除当前LOD级别的可见节点记录
         this.visibleNodes = {};
+        this.visibleNodes[currentLevel] = new Set();
         
-        // 检查LOD节点是否在视锥内
-        for (let level = 0; level < this.lodMeshes.length; level++) {
-            if (!this.lodMeshes[level]) continue;
-            
-            const mesh = this.lodMeshes[level];
-            const geometry = mesh.geometry;
-            const positions = geometry.attributes.position;
-            const count = positions.count;
-            
-            if (!this.visibleNodes[level]) {
-                this.visibleNodes[level] = new Set();
-            }
-            
-            // 获取当前LOD级别的点
-            const nodes = this.precomputedLOD && this.precomputedLOD[level] ? 
-                this.precomputedLOD[level] : 
-                (level < this.allNodes.length ? this.allNodes.filter(n => n.depth <= level) : []);
-            
-            if (nodes.length === 0) continue;
-            
-            // 为每组点使用八叉树节点边界进行快速剔除
-            const groups = this.groupNodesByRegion(nodes);
-            
-            for (const [regionKey, nodeGroup] of Object.entries(groups)) {
-                // 计算该组节点的边界球
-                const boundingSphere = this.calculateBoundingSphere(nodeGroup);
-                
-                // 检查边界球是否在视锥体内
-                if (frustum.intersectsSphere(boundingSphere)) {
-                    // 如果在，添加所有节点索引
-                    for (const node of nodeGroup) {
-                        const index = nodes.indexOf(node);
-                        if (index >= 0 && index < count) {
-                            this.visibleNodes[level].add(index);
-                        }
-                    }
-                }
-            }
-            
-            console.log(`LOD ${level}: ${this.visibleNodes[level].size}/${count} 个点在视锥内`);
+        const mesh = this.lodMeshes[currentLevel];
+        const geometry = mesh.geometry;
+        const positions = geometry.attributes.position;
+        const count = positions.count;
+        
+        // 如果点数量少，进行精确剔除
+        if (count <= 5000) {
+            this.performPreciseCulling(currentLevel, frustum);
+        } 
+        // 点数量中等，使用改进的分块剔除
+        else if (count <= 50000) {
+            this.performBlockCulling(currentLevel, frustum, positions, camera);
+        } 
+        // 点数量大，使用高效剔除或禁用剔除
+        else {
+            this.performSimplifiedCulling(currentLevel, frustum, positions);
         }
     }
     
-    // 按区域分组节点，用于加速视锥剔除
-    groupNodesByRegion(nodes, divisionSize = 4) {
-        const groups = {};
-        const bounds = this.bounds;
-        const sizeX = bounds.max.x - bounds.min.x;
-        const sizeY = bounds.max.y - bounds.min.y;
-        const sizeZ = bounds.max.z - bounds.min.z;
-        const cellSizeX = sizeX / divisionSize;
-        const cellSizeY = sizeY / divisionSize;
-        const cellSizeZ = sizeZ / divisionSize;
+    // 精确剔除 - 适用于点数量少的情况
+    performPreciseCulling(level, frustum) {
+        const nodes = this.precomputedLOD && this.precomputedLOD[level] ? 
+            this.precomputedLOD[level] : 
+            (level < this.allNodes.length ? this.allNodes.filter(n => n.depth <= level) : []);
         
-        for (const node of nodes) {
-            // 确定节点所在的空间区域
-            const x = Math.floor((node.position.x - bounds.min.x) / cellSizeX);
-            const y = Math.floor((node.position.y - bounds.min.y) / cellSizeY);
-            const z = Math.floor((node.position.z - bounds.min.z) / cellSizeZ);
-            
-            // 区域key
-            const regionKey = `${x},${y},${z}`;
-            
-            if (!groups[regionKey]) {
-                groups[regionKey] = [];
-            }
-            
-            groups[regionKey].push(node);
+        if (nodes.length === 0) return;
+        
+        // 创建节点索引映射，避免多次调用indexOf
+        const nodeIndexMap = new Map();
+        const positions = this.lodMeshes[level].geometry.attributes.position;
+        const count = positions.count;
+        
+        for (let i = 0; i < Math.min(nodes.length, count); i++) {
+            nodeIndexMap.set(nodes[i], i);
         }
         
-        return groups;
+        // 空间划分优化
+        const divisionSize = nodes.length > 2000 ? 2 : 4; // 少分割，减少开销
+        const groups = this.groupNodesByRegion(nodes, divisionSize);
+        
+        for (const [regionKey, nodeGroup] of Object.entries(groups)) {
+            // 计算该组节点的边界球
+            const boundingSphere = this.calculateBoundingSphere(nodeGroup);
+            
+            // 检查边界球是否在视锥体内
+            if (frustum.intersectsSphere(boundingSphere)) {
+                // 如果在，添加所有节点索引
+                for (const node of nodeGroup) {
+                    const index = nodeIndexMap.get(node);
+                    if (index !== undefined && index < count) {
+                        this.visibleNodes[level].add(index);
+                    }
+                }
+            }
+        }
     }
     
     // 计算一组节点的边界球
@@ -854,49 +922,334 @@ class DMOctreeLoader {
             Math.sqrt(maxDistSq)
         );
     }
+
+    // 使用分块方式进行剔除 - 适用于中等数量的点
+    performBlockCulling(level, frustum, positions, camera) {
+        const blockSize = 200; // 每个区块的点数
+        const posArray = positions.array;
+        const count = positions.count;
+        
+        // 计算整个点云的边界框
+        const sceneCenter = new THREE.Vector3(
+            (this.bounds.min.x + this.bounds.max.x) / 2,
+            (this.bounds.min.y + this.bounds.max.y) / 2,
+            (this.bounds.min.z + this.bounds.max.z) / 2
+        );
+        
+        // 安全获取相机位置
+        let distanceToCenter = 0;
+        try {
+            // 尝试获取当前函数作用域的相机
+            const currentCamera = camera || window.camera;
+            if (currentCamera && currentCamera.position) {
+                const cameraPosition = new THREE.Vector3().copy(currentCamera.position);
+                distanceToCenter = cameraPosition.distanceTo(sceneCenter);
+            } else {
+                // 如果无法获取相机，使用默认逻辑
+                distanceToCenter = this.getBoundingSphereRadius() * 2;
+            }
+        } catch (e) {
+            console.warn("无法获取相机位置，使用默认剔除逻辑");
+            distanceToCenter = this.getBoundingSphereRadius() * 2;
+        }
+        
+        // 如果相机离模型太远，可能大部分点都会被剔除，应用细粒度剔除
+        if (distanceToCenter > this.getBoundingSphereRadius() * 3) {
+            // 每个区块大小需要更大，以减少计算量
+            for (let blockStart = 0; blockStart < count; blockStart += blockSize) {
+                this.processCullingBlock(level, frustum, posArray, blockStart, 
+                    Math.min(blockStart + blockSize, count), camera);
+            }
+        } else {
+            // 处理所有点为一个大区块，提高性能
+            this.processCullingBlock(level, frustum, posArray, 0, count, camera);
+        }
+    }
     
-    // 应用视锥剔除结果到几何体上
-    applyFrustumCulling(scene) {
+    // 处理一个点分块的剔除
+    processCullingBlock(level, frustum, posArray, blockStart, blockEnd, camera) {
+        // 计算区块的边界盒
+        let minX = Infinity, minY = Infinity, minZ = Infinity;
+        let maxX = -Infinity, maxY = -Infinity, maxZ = -Infinity;
+        
+        // 首先找出这个区块的边界
+        for (let i = blockStart; i < blockEnd; i++) {
+            const idx = i * 3;
+            const x = posArray[idx];
+            const y = posArray[idx + 1];
+            const z = posArray[idx + 2];
+            
+            // 跳过之前被"隐藏"的点
+            if (Math.abs(x) > 1e9) continue;
+            
+            minX = Math.min(minX, x);
+            minY = Math.min(minY, y);
+            minZ = Math.min(minZ, z);
+            maxX = Math.max(maxX, x);
+            maxY = Math.max(maxY, y);
+            maxZ = Math.max(maxZ, z);
+        }
+        
+        // 如果区块为空，跳过
+        if (minX === Infinity) return;
+        
+        // 计算边界球中心
+        const centerX = (minX + maxX) / 2;
+        const centerY = (minY + maxY) / 2;
+        const centerZ = (minZ + maxZ) / 2;
+        
+        // 计算半径 - 使用边界盒对角线的一半
+        const radius = Math.sqrt(
+            Math.pow(maxX - minX, 2) +
+            Math.pow(maxY - minY, 2) +
+            Math.pow(maxZ - minZ, 2)
+        ) / 2;
+        
+        const boundingSphere = new THREE.Sphere(
+            new THREE.Vector3(centerX, centerY, centerZ),
+            radius
+        );
+        
+        // 检查边界球是否在视锥体内
+        if (frustum.intersectsSphere(boundingSphere)) {
+            // 添加区块中的所有点
+            for (let i = blockStart; i < blockEnd; i++) {
+                this.visibleNodes[level].add(i);
+            }
+        }
+    }
+    
+    // 简化的视锥剔除方法，用于大量点
+    performSimplifiedCulling(level, frustum, positions) {
+        const posArray = positions.array;
+        const count = positions.count;
+        
+        // 计算整个点云的边界球 - 使用实际计算的中心点
+        const bounds = this.actualBounds || this.bounds;
+        const center = new THREE.Vector3(
+            (bounds.min.x + bounds.max.x) / 2,
+            (bounds.min.y + bounds.max.y) / 2,
+            (bounds.min.z + bounds.max.z) / 2
+        );
+        
+        const radius = this.getBoundingSphereRadius();
+        const boundingSphere = new THREE.Sphere(center, radius);
+        
+        // 检查整个模型是否在视锥内
+        if (frustum.intersectsSphere(boundingSphere)) {
+            // 如果整个模型在视锥内，考虑所有点可见
+            for (let i = 0; i < count; i++) {
+                this.visibleNodes[level].add(i);
+            }
+            return;
+        }
+        
+        // 如果模型很大，采用更粗粒度的剔除方式，将模型分成8个象限
+        const octants = this.divideIntoOctants(posArray, count);
+        
+        for (let octantIndex = 0; octantIndex < octants.length; octantIndex++) {
+            const octant = octants[octantIndex];
+            if (octant.count === 0) continue;
+            
+            const octantSphere = new THREE.Sphere(
+                new THREE.Vector3(octant.center.x, octant.center.y, octant.center.z),
+                octant.radius
+            );
+            
+            if (frustum.intersectsSphere(octantSphere)) {
+                // 将这个象限的所有点标记为可见
+                for (let i = 0; i < octant.indices.length; i++) {
+                    this.visibleNodes[level].add(octant.indices[i]);
+                }
+            }
+        }
+    }
+    
+    // 将点云分成8个象限，用于高效剔除
+    divideIntoOctants(posArray, count) {
+        const octants = [];
+        for (let i = 0; i < 8; i++) {
+            octants.push({
+                indices: [],
+                center: {x: 0, y: 0, z: 0},
+                count: 0,
+                radius: 0
+            });
+        }
+        
+        // 使用实际数据中心，而不是可能不准确的边界框中心
+        const bounds = this.actualBounds || this.bounds;
+        const centerX = (bounds.min.x + bounds.max.x) / 2;
+        const centerY = (bounds.min.y + bounds.max.y) / 2;
+        const centerZ = (bounds.min.z + bounds.max.z) / 2;
+        
+        // 第一遍：收集每个象限的点
+        for (let i = 0; i < count; i++) {
+            const idx = i * 3;
+            const x = posArray[idx];
+            const y = posArray[idx + 1];
+            const z = posArray[idx + 2];
+            
+            // 跳过之前被"隐藏"的点
+            if (Math.abs(x) > 1e9) continue;
+            
+            // 确定点属于哪个象限
+            const octantIndex = (x > centerX ? 1 : 0) +
+                               (y > centerY ? 2 : 0) +
+                               (z > centerZ ? 4 : 0);
+            
+            octants[octantIndex].indices.push(i);
+            octants[octantIndex].count++;
+        }
+        
+        // 第二遍：计算每个象限的中心和半径
+        for (let i = 0; i < 8; i++) {
+            const octant = octants[i];
+            if (octant.count === 0) continue;
+            
+            let sumX = 0, sumY = 0, sumZ = 0;
+            let minX = Infinity, minY = Infinity, minZ = Infinity;
+            let maxX = -Infinity, maxY = -Infinity, maxZ = -Infinity;
+            
+            for (const pointIndex of octant.indices) {
+                const idx = pointIndex * 3;
+                const x = posArray[idx];
+                const y = posArray[idx + 1];
+                const z = posArray[idx + 2];
+                
+                sumX += x;
+                sumY += y;
+                sumZ += z;
+                
+                minX = Math.min(minX, x);
+                minY = Math.min(minY, y);
+                minZ = Math.min(minZ, z);
+                maxX = Math.max(maxX, x);
+                maxY = Math.max(maxY, y);
+                maxZ = Math.max(maxZ, z);
+            }
+            
+            // 计算平均中心点
+            octant.center.x = sumX / octant.count;
+            octant.center.y = sumY / octant.count;
+            octant.center.z = sumZ / octant.count;
+            
+            // 计算最大半径
+            octant.radius = Math.sqrt(
+                Math.pow(maxX - minX, 2) +
+                Math.pow(maxY - minY, 2) +
+                Math.pow(maxZ - minZ, 2)
+            ) / 2;
+        }
+        
+        return octants;
+    }
+    
+    // 获取边界球半径
+    getBoundingSphereRadius() {
+        // 优先使用实际数据计算的边界
+        const bounds = this.actualBounds || this.bounds;
+        
+        const sizeX = bounds.max.x - bounds.min.x;
+        const sizeY = bounds.max.y - bounds.min.y;
+        const sizeZ = bounds.max.z - bounds.min.z;
+        return Math.sqrt(sizeX*sizeX + sizeY*sizeY + sizeZ*sizeZ) / 2;
+    }
+    
+    // 应用视锥剔除结果到几何体上 - 优化性能
+    applyFrustumCulling(scene, camera) {
         if (!this.frustumCullingEnabled || !this.visibleNodes) return;
         
-        for (let level = 0; level < this.lodMeshes.length; level++) {
-            const mesh = this.lodMeshes[level];
-            if (!mesh || !scene.children.includes(mesh)) continue;
-            
-            const visibleIndices = this.visibleNodes[level];
-            if (!visibleIndices || visibleIndices.size === 0) continue;
-            
-            const geometry = mesh.geometry;
-            const positions = geometry.attributes.position;
-            const colors = geometry.attributes.color;
-            
-            // 使用点隐藏而不是完全重建几何体可以提高性能
-            // 通过将不可见点移到远离相机的位置来"隐藏"它们
-            const posArray = positions.array;
-            
+        // 只处理当前LOD级别
+        const currentLevel = this._lastLODLevel !== undefined ? this._lastLODLevel : 0;
+        const mesh = this.lodMeshes[currentLevel];
+        
+        if (!mesh || !scene.children.includes(mesh)) return;
+        
+        const visibleIndices = this.visibleNodes[currentLevel];
+        if (!visibleIndices) return;
+        
+        const geometry = mesh.geometry;
+        const positions = geometry.attributes.position;
+        
+        // 缓存原始位置，避免重复计算
+        if (!this._originalPositions) {
+            this._originalPositions = {};
+        }
+        
+        // 如果几乎所有点都可见，跳过剔除以提高性能
+        if (visibleIndices.size > positions.count * 0.9) {
+            // 恢复所有点的位置
+            if (this._originalPositions[currentLevel]) {
+                this.resetPositions(currentLevel, positions);
+            }
+            return;
+        }
+        
+        // 为当前LOD级别保存原始位置
+        if (!this._originalPositions[currentLevel]) {
+            this._originalPositions[currentLevel] = new Float32Array(positions.array);
+        }
+        
+        const posArray = positions.array;
+        const originalPos = this._originalPositions[currentLevel];
+        
+        // 如果可见点数量很少，使用优化的剔除方法
+        if (visibleIndices.size < positions.count * 0.1) {
+            // 先隐藏所有点
             for (let i = 0; i < positions.count; i++) {
                 const idx = i * 3;
-                const visible = visibleIndices.has(i);
-                
-                if (!visible) {
-                    // 将点移到非常远的地方，实际上是"隐藏"它
+                posArray[idx] = 1e10;
+                posArray[idx+1] = 1e10;
+                posArray[idx+2] = 1e10;
+            }
+            
+            // 只恢复可见点
+            for (const i of visibleIndices) {
+                const idx = i * 3;
+                posArray[idx] = originalPos[idx];
+                posArray[idx+1] = originalPos[idx+1];
+                posArray[idx+2] = originalPos[idx+2];
+            }
+        } else {
+            // 如果可见点数量较多，只隐藏不可见点
+            for (let i = 0; i < positions.count; i++) {
+                const idx = i * 3;
+                if (visibleIndices.has(i)) {
+                    // 恢复可见点的原始位置
+                    posArray[idx] = originalPos[idx];
+                    posArray[idx+1] = originalPos[idx+1];
+                    posArray[idx+2] = originalPos[idx+2];
+                } else {
+                    // 隐藏不可见点
                     posArray[idx] = 1e10;
                     posArray[idx+1] = 1e10;
                     posArray[idx+2] = 1e10;
                 }
             }
-            
-            // 更新几何体
-            positions.needsUpdate = true;
         }
+        
+        // 更新几何体
+        positions.needsUpdate = true;
+    }
+    
+    // 重置点位置到原始状态
+    resetPositions(level, positions) {
+        if (!this._originalPositions || !this._originalPositions[level]) return;
+        
+        const posArray = positions.array;
+        const originalPos = this._originalPositions[level];
+        
+        for (let i = 0; i < Math.min(posArray.length, originalPos.length); i++) {
+            posArray[i] = originalPos[i];
+        }
+        
+        positions.needsUpdate = true;
     }
 
     // 更新LOD显示，包含视锥剔除
     updateLOD(camera, scene, boundingRadius) {
         if (!this.lodMeshes || this.lodMeshes.length === 0) return;
-        
-        // 执行视锥剔除
-        this.performFrustumCulling(camera);
         
         // 获取当前应显示的LOD级别
         const currentLevel = this.getLODLevelForDistance(camera, boundingRadius);
@@ -907,29 +1260,165 @@ class DMOctreeLoader {
             if (scene.children.includes(mesh)) {
                 if (i !== currentLevel) {
                     scene.remove(mesh);
-                } else {
-                    // 应用视锥剔除
-                    this.applyFrustumCulling(scene);
+                } else if (this.frustumCullingEnabled) {
+                    // 只在当前级别执行视锥剔除
+                    this.performFrustumCulling(camera);
+                    this.applyFrustumCulling(scene, camera);
                 }
             } else if (i === currentLevel) {
                 scene.add(mesh);
-                // 应用视锥剔除
-                this.applyFrustumCulling(scene);
+                if (this.frustumCullingEnabled) {
+                    // 添加新级别时执行视锥剔除
+                    this.performFrustumCulling(camera);
+                    this.applyFrustumCulling(scene, camera);
+                }
             }
         }
     }
     
     // 辅助方法：自动设置相机位置以查看整个模型
     setupCamera(camera, controls) {
-        // 计算模型中心
-        const centerX = (this.bounds.min.x + this.bounds.max.x) / 2;
-        const centerY = (this.bounds.min.y + this.bounds.max.y) / 2;
-        const centerZ = (this.bounds.min.z + this.bounds.max.z) / 2;
+        // 初始化中心点和边界计算值
+        let centerX = 0, centerY = 0, centerZ = 0;
+        let totalPoints = 0;
+        let minX = Number.MAX_VALUE, minY = Number.MAX_VALUE, minZ = Number.MAX_VALUE;
+        let maxX = Number.MIN_VALUE, maxY = Number.MIN_VALUE, maxZ = Number.MIN_VALUE;
+        
+        // 使用LOD网格中的实际点数据计算中心和边界
+        // 这比使用allNodes更准确，因为它只包含实际渲染的点
+        let actualPointsUsed = false;
+        if (this.lodMeshes && this.lodMeshes.length > 0) {
+            // 使用级别最高的LOD（通常是最后一个，包含最多的点）
+            const highestLODIndex = this.lodMeshes.length - 1;
+            const highestLOD = this.lodMeshes[highestLODIndex];
+            
+            if (highestLOD && highestLOD.geometry && highestLOD.geometry.attributes.position) {
+                const positions = highestLOD.geometry.attributes.position.array;
+                const count = highestLOD.geometry.attributes.position.count;
+                
+                console.log(`使用LOD ${highestLODIndex} 的 ${count} 个实际渲染点计算中心和边界`);
+                
+                // 遍历所有实际渲染的点
+                for (let i = 0; i < count; i++) {
+                    const idx = i * 3;
+                    const x = positions[idx];
+                    const y = positions[idx+1];
+                    const z = positions[idx+2];
+                    
+                    // 跳过隐藏的点 (通常被设置到很远的位置)
+                    if (Math.abs(x) > 1e5 || Math.abs(y) > 1e5 || Math.abs(z) > 1e5) continue;
+                    
+                    centerX += x;
+                    centerY += y;
+                    centerZ += z;
+                    totalPoints++;
+                    
+                    minX = Math.min(minX, x);
+                    minY = Math.min(minY, y);
+                    minZ = Math.min(minZ, z);
+                    maxX = Math.max(maxX, x);
+                    maxY = Math.max(maxY, y);
+                    maxZ = Math.max(maxZ, z);
+                }
+                
+                actualPointsUsed = true;
+            }
+        }
+        
+        // 如果无法从LOD网格获取点数据，尝试使用allNodes
+        if (!actualPointsUsed && this.allNodes && this.allNodes.length > 0) {
+            console.log("使用allNodes计算中心和边界");
+            
+            // 重置计数器
+            centerX = 0; centerY = 0; centerZ = 0;
+            totalPoints = 0;
+            minX = Number.MAX_VALUE; minY = Number.MAX_VALUE; minZ = Number.MAX_VALUE;
+            maxX = Number.MIN_VALUE; maxY = Number.MIN_VALUE; maxZ = Number.MIN_VALUE;
+            
+            // 过滤出有实际数据的节点
+            const validNodes = this.allNodes.filter(node => 
+                node && node.position && 
+                (node.isLeaf === true || node.value !== undefined)
+            );
+            
+            for (const node of validNodes) {
+                // 确保位置在合理范围内
+                if (Math.abs(node.position.x) > 1e5 || 
+                    Math.abs(node.position.y) > 1e5 || 
+                    Math.abs(node.position.z) > 1e5) continue;
+                
+                centerX += node.position.x;
+                centerY += node.position.y;
+                centerZ += node.position.z;
+                totalPoints++;
+                
+                minX = Math.min(minX, node.position.x);
+                minY = Math.min(minY, node.position.y);
+                minZ = Math.min(minZ, node.position.z);
+                maxX = Math.max(maxX, node.position.x);
+                maxY = Math.max(maxY, node.position.y);
+                maxZ = Math.max(maxZ, node.position.z);
+            }
+        }
+        
+        // 如果有足够的点计算中心点
+        if (totalPoints > 0) {
+            // 计算平均中心
+            centerX /= totalPoints;
+            centerY /= totalPoints;
+            centerZ /= totalPoints;
+            
+            console.log(`计算得到的数据中心点: (${centerX.toFixed(2)}, ${centerY.toFixed(2)}, ${centerZ.toFixed(2)}), 使用了 ${totalPoints} 个点`);
+            
+            // 更新实际使用的边界 - 几乎不添加额外边距
+            const padding = 0.01; // 仅添加1%的边距
+            const sizeX = maxX - minX;
+            const sizeY = maxY - minY;
+            const sizeZ = maxZ - minZ;
+            
+            this.actualBounds = {
+                min: { 
+                    x: minX - sizeX * padding, 
+                    y: minY - sizeY * padding, 
+                    z: minZ - sizeZ * padding 
+                },
+                max: { 
+                    x: maxX + sizeX * padding, 
+                    y: maxY + sizeY * padding, 
+                    z: maxZ + sizeZ * padding 
+                }
+            };
+            
+            console.log("计算得到的实际数据边界:", {
+                min: { 
+                    x: this.actualBounds.min.x.toFixed(2), 
+                    y: this.actualBounds.min.y.toFixed(2), 
+                    z: this.actualBounds.min.z.toFixed(2) 
+                },
+                max: { 
+                    x: this.actualBounds.max.x.toFixed(2), 
+                    y: this.actualBounds.max.y.toFixed(2), 
+                    z: this.actualBounds.max.z.toFixed(2) 
+                },
+                size: { 
+                    x: sizeX.toFixed(2), 
+                    y: sizeY.toFixed(2), 
+                    z: sizeZ.toFixed(2) 
+                }
+            });
+        } else {
+            // 无法计算实际中心，回退到使用文件中的边界
+            console.warn("无法计算实际数据中心，回退到使用边界框中心");
+            centerX = (this.bounds.min.x + this.bounds.max.x) / 2;
+            centerY = (this.bounds.min.y + this.bounds.max.y) / 2;
+            centerZ = (this.bounds.min.z + this.bounds.max.z) / 2;
+            this.actualBounds = this.bounds;
+        }
         
         // 计算模型尺寸
-        const sizeX = this.bounds.max.x - this.bounds.min.x;
-        const sizeY = this.bounds.max.y - this.bounds.min.y;
-        const sizeZ = this.bounds.max.z - this.bounds.min.z;
+        const sizeX = this.actualBounds.max.x - this.actualBounds.min.x;
+        const sizeY = this.actualBounds.max.y - this.actualBounds.min.y;
+        const sizeZ = this.actualBounds.max.z - this.actualBounds.min.z;
         const maxSize = Math.max(sizeX, sizeY, sizeZ);
         
         // 设置相机位置
@@ -952,13 +1441,43 @@ class DMOctreeLoader {
             size: maxSize
         };
     }
+
+    // 按区域分组节点，用于加速视锥剔除
+    groupNodesByRegion(nodes, divisionSize = 4) {
+        const groups = {};
+        const bounds = this.bounds;
+        const sizeX = bounds.max.x - bounds.min.x;
+        const sizeY = bounds.max.y - bounds.min.y;
+        const sizeZ = bounds.max.z - bounds.min.z;
+        const cellSizeX = sizeX / divisionSize;
+        const cellSizeY = sizeY / divisionSize;
+        const cellSizeZ = sizeZ / divisionSize;
+        
+        for (const node of nodes) {
+            // 确定节点所在的空间区域
+            const x = Math.floor((node.position.x - bounds.min.x) / cellSizeX);
+            const y = Math.floor((node.position.y - bounds.min.y) / cellSizeY);
+            const z = Math.floor((node.position.z - bounds.min.z) / cellSizeZ);
+            
+            // 区域key
+            const regionKey = `${x},${y},${z}`;
+            
+            if (!groups[regionKey]) {
+                groups[regionKey] = [];
+            }
+            
+            groups[regionKey].push(node);
+        }
+        
+        return groups;
+    }
 }
 
 // 示例用法
 export function loadAndDisplayDMOctree(url, scene, camera, renderer, controls) {
     const loader = new DMOctreeLoader();
     let boundingRadius = 200; // 初始估计值
-    
+    debugger
     loader.load(url, () => {
         // 调整相机位置
         const modelInfo = loader.setupCamera(camera, controls);
@@ -966,33 +1485,8 @@ export function loadAndDisplayDMOctree(url, scene, camera, renderer, controls) {
         
         console.log("模型信息:", modelInfo);
         
-        // 添加参考几何体帮助调试
-        const centerSphere = new THREE.Mesh(
-            new THREE.SphereGeometry(5, 16, 16),
-            new THREE.MeshBasicMaterial({ color: 0xff0000 })
-        );
-        centerSphere.position.copy(modelInfo.center);
-        scene.add(centerSphere);
-        
-        // 添加边界框帮助调试
-        const boxGeometry = new THREE.BoxGeometry(
-            loader.bounds.max.x - loader.bounds.min.x,
-            loader.bounds.max.y - loader.bounds.min.y,
-            loader.bounds.max.z - loader.bounds.min.z
-        );
-        const boxMaterial = new THREE.MeshBasicMaterial({ 
-            color: 0xffff00, 
-            wireframe: true,
-            transparent: true,
-            opacity: 0.3
-        });
-        const boundingBox = new THREE.Mesh(boxGeometry, boxMaterial);
-        boundingBox.position.set(
-            (loader.bounds.min.x + loader.bounds.max.x) / 2,
-            (loader.bounds.min.y + loader.bounds.max.y) / 2,
-            (loader.bounds.min.z + loader.bounds.max.z) / 2
-        );
-        scene.add(boundingBox);
+        // 创建和添加可视化调试辅助工具
+        generateLODDebugVisuals(loader, scene, modelInfo);
         
         // 初始加载时添加到场景
         if (loader.lodMeshes && loader.lodMeshes.length > 0) {
@@ -1030,4 +1524,105 @@ export function loadAndDisplayDMOctree(url, scene, camera, renderer, controls) {
     });
     
     return loader;
+}
+
+// 创建调试可视化辅助工具
+function generateLODDebugVisuals(loader, scene, modelInfo) {
+    // 清除已有的辅助工具
+    scene.children.forEach(child => {
+        if (child.name && (
+            child.name.startsWith('centerMarker') || 
+            child.name.startsWith('boundingBox') ||
+            child.name.startsWith('dataPoint')
+        )) {
+            scene.remove(child);
+        }
+    });
+    
+    // 1. 添加数据中心点标记 - 红色球体
+    const centerSphere = new THREE.Mesh(
+        new THREE.SphereGeometry(5, 16, 16),
+        new THREE.MeshBasicMaterial({ color: 0xff0000 })
+    );
+    centerSphere.name = 'centerMarker';
+    centerSphere.position.copy(modelInfo.center);
+    scene.add(centerSphere);
+    
+    // 2. 添加实际数据边界框 - 黄色线框
+    const actualBounds = loader.actualBounds || loader.bounds;
+    const boxGeometry = new THREE.BoxGeometry(
+        actualBounds.max.x - actualBounds.min.x,
+        actualBounds.max.y - actualBounds.min.y,
+        actualBounds.max.z - actualBounds.min.z
+    );
+    const boxMaterial = new THREE.MeshBasicMaterial({ 
+        color: 0xffff00, 
+        wireframe: true,
+        transparent: true,
+        opacity: 0.3
+    });
+    const boundingBox = new THREE.Mesh(boxGeometry, boxMaterial);
+    boundingBox.name = 'boundingBox';
+    boundingBox.position.set(
+        (actualBounds.min.x + actualBounds.max.x) / 2,
+        (actualBounds.min.y + actualBounds.max.y) / 2,
+        (actualBounds.min.z + actualBounds.max.z) / 2  // 修正：使用max.z而不是min.z
+    );
+    scene.add(boundingBox);
+    
+    // 3. 边界框线框 - 更清晰的黄色线
+    const boxLines = new THREE.Box3Helper(
+        new THREE.Box3(
+            new THREE.Vector3(actualBounds.min.x, actualBounds.min.y, actualBounds.min.z),
+            new THREE.Vector3(actualBounds.max.x, actualBounds.max.y, actualBounds.max.z)
+        ),
+        0xffff00
+    );
+    boxLines.name = 'boundingBoxLines';
+    scene.add(boxLines);
+    
+    // 4. 可选：显示原始文件边界框（如果与实际边界不同）
+    if (loader.bounds !== loader.actualBounds) {
+        const originalBoxLines = new THREE.Box3Helper(
+            new THREE.Box3(
+                new THREE.Vector3(loader.bounds.min.x, loader.bounds.min.y, loader.bounds.min.z),
+                new THREE.Vector3(loader.bounds.max.x, loader.bounds.max.y, loader.bounds.max.z)
+            ),
+            0x0000ff // 蓝色
+        );
+        originalBoxLines.name = 'originalBoundingBoxLines';
+        originalBoxLines.material.transparent = true;
+        originalBoxLines.material.opacity = 0.2;
+        scene.add(originalBoxLines);
+    }
+    
+    // // 5. 可选：为数据点添加明显标记
+    // if (loader.lodMeshes && loader.lodMeshes.length > 0) {
+    //     // 使用最详细的LOD级别
+    //     const highestLOD = loader.lodMeshes[loader.lodMeshes.length - 1];
+    //     if (highestLOD && highestLOD.geometry && highestLOD.geometry.attributes.position) {
+    //         // 只标记一小部分点，避免性能问题
+    //         const positions = highestLOD.geometry.attributes.position;
+    //         const step = Math.ceil(positions.count / 10); // 只显示约1/10的点
+            
+    //         for (let i = 0; i < positions.count; i += step) {
+    //             const x = positions.array[i * 3];
+    //             const y = positions.array[i * 3 + 1];
+    //             const z = positions.array[i * 3 + 2];
+                
+    //             // 跳过被隐藏的点
+    //             if (Math.abs(x) > 1e5 || Math.abs(y) > 1e5 || Math.abs(z) > 1e5) continue;
+                
+    //             const pointMarker = new THREE.Mesh(
+    //                 new THREE.SphereGeometry(2, 8, 8),
+    //                 new THREE.MeshBasicMaterial({ color: 0x00ff00 }) // 绿色
+    //             );
+    //             pointMarker.name = `dataPoint_${i}`;
+    //             pointMarker.position.set(x, y, z);
+    //             scene.add(pointMarker);
+    //         }
+    //     }
+    // }
+    
+    console.log("已添加调试可视化辅助工具");
 }

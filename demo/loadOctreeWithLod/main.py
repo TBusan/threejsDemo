@@ -243,7 +243,7 @@ def write_octree_to_binary(node, file, lod_data=None):
                 # 写入子节点
                 write_octree_to_binary(node.children[i], file, lod_data)
 
-def write_octree_with_lod(root, filename, max_lod_depth=18):
+def write_octree_with_lod(root, filename, max_lod_depth=18, original_point_count=0):
     """将八叉树写入DM文件，包括LOD数据"""
     data = []
     bounds_min = [root.x_min, root.y_min, root.z_min]
@@ -252,13 +252,25 @@ def write_octree_with_lod(root, filename, max_lod_depth=18):
     # 预先生成LOD数据
     print("正在为各层级生成LOD数据...")
     lod_data = []
+    actual_max_depth = -1
     for depth in range(max_lod_depth + 1):
         points = root.get_points_for_lod(depth)
         if points:
-            print(f"LOD级别 {depth}: 生成了 {len(points)} 个点")
+            point_count = len(points)
             lod_data.append(points)
+            print(f"LOD级别 {depth}: 生成了 {point_count} 个点")
+            actual_max_depth = depth
+            
+            # 如果当前深度的点数接近或等于原始数据点数，则停止生成更高深度的LOD
+            # 允许5%的误差
+            if original_point_count > 0 and point_count >= original_point_count * 0.95:
+                print(f"在深度 {depth} 时点数已接近原始数据点数 ({point_count}/{original_point_count})，停止生成更高深度的LOD")
+                break
         else:
             print(f"LOD级别 {depth}: 没有点")
+    
+    # 更新实际使用的最大LOD深度
+    print(f"实际使用的最大LOD深度: {actual_max_depth} (原始设置: {max_lod_depth})")
     
     with open(filename, 'wb') as file:
         # 文件头
@@ -300,6 +312,8 @@ def write_octree_with_lod(root, filename, max_lod_depth=18):
                 file.write(struct.pack('dddd', x, y, z, value))  # 写入点数据
         
         print(f"总共写入了 {len(lod_data)} 个LOD级别")
+        
+    return actual_max_depth
 
 def read_hsp_file(filename):
     data = []
@@ -527,7 +541,10 @@ def convert_hsp_to_dm(hsp_filename, dm_filename, min_size=0.1, max_depth=18):
         print("错误: 未读取到任何数据点")
         return
     
-    print(f"正在构建八叉树 (共 {len(data)} 个点)...")
+    # 记录原始数据的点数量，用于后续LOD生成时的比较
+    original_point_count = len(data)
+    
+    print(f"正在构建八叉树 (共 {original_point_count} 个点)...")
     print(f"使用参数: min_size={min_size}, max_depth={max_depth}")
     octree = build_octree(data, min_size, max_depth)
     
@@ -554,18 +571,20 @@ def convert_hsp_to_dm(hsp_filename, dm_filename, min_size=0.1, max_depth=18):
         print(f"  深度 {depth}: 总计 {depth_data['total']} 个节点, 其中叶子节点 {depth_data['leaves']} 个")
     
     # 生成LOD样本数据用于调试
-    lod_samples = generate_sample_lod_data(octree, min(actual_max_depth, max_depth))
+    proposed_max_depth = min(actual_max_depth, max_depth)
+    lod_samples = generate_sample_lod_data(octree, proposed_max_depth)
     print(f"\n生成了 {len(lod_samples)} 个LOD级别的样本数据")
     
     if not valid or valid_leaves == 0:
         print("警告: 八叉树结构可能有问题，没有有效的叶子节点")
     
     print(f"\n正在写入增强版二进制八叉树(含LOD数据)到 {dm_filename}...")
-    # 使用新的写入函数，支持LOD数据
-    write_octree_with_lod(octree, dm_filename, min(actual_max_depth, max_depth))
+    # 使用新的写入函数，支持LOD数据，并传入原始点数用于判断最大LOD深度
+    used_max_depth = write_octree_with_lod(octree, dm_filename, proposed_max_depth, original_point_count)
     
     print(f"转换完成. 输出已保存到 {dm_filename}")
     print(f"总共写入 {written_nodes} 个节点")
+    print(f"最终使用的LOD深度: {used_max_depth} (原始设置: {max_depth}, 八叉树实际深度: {actual_max_depth})")
     
     # 显示深度分布
     print(f"叶子节点深度分布: {depth_distribution}")
@@ -574,7 +593,7 @@ def convert_hsp_to_dm(hsp_filename, dm_filename, min_size=0.1, max_depth=18):
     file_size = os.path.getsize(dm_filename)
     print(f"文件大小: {file_size / (1024*1024):.2f} MB")
     
-    return total_nodes, depth_distribution
+    return total_nodes, depth_distribution, used_max_depth
 
 if __name__ == "__main__":
     import sys

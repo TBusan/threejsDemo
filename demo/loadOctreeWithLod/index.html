@@ -55,11 +55,54 @@
         #loadButton:hover {
             background: #45a049;
         }
+        #controls {
+            position: absolute;
+            top: 10px;
+            right: 10px;
+            background: rgba(0,0,0,0.5);
+            padding: 10px;
+            border-radius: 5px;
+            z-index: 100;
+        }
+        .control-option {
+            margin-bottom: 10px;
+        }
+        .control-option input {
+            margin-right: 10px;
+        }
+        .keyboard-shortcuts {
+            margin-top: 10px;
+            text-align: left;
+            color: #ccc;
+            border-top: 1px solid #555;
+            padding-top: 8px;
+        }
+        .keyboard-shortcuts small {
+            display: block;
+            font-size: 0.8em;
+            line-height: 1.5;
+        }
     </style>
 </head>
 <body>
     <div id="info">DM Octree Viewer - 基于八叉树的LOD点云可视化</div>
     <div id="stats">相机位置: (0,0,0)<br>当前LOD级别: -<br>可见点数: 0</div>
+    <div id="controls">
+        <div class="control-option">
+            <input type="checkbox" id="frustumCullingToggle" checked>
+            <label for="frustumCullingToggle">启用视锥剔除</label>
+        </div>
+        <div class="control-option">
+            <label for="pointSizeSlider">点大小: </label>
+            <input type="range" id="pointSizeSlider" min="1" max="10" value="5" step="0.5">
+        </div>
+        <div class="control-option keyboard-shortcuts">
+            <small>键盘快捷键:<br>
+            G - 显示/隐藏网格<br>
+            A - 显示/隐藏坐标轴<br>
+            C - 开启/关闭视锥剔除</small>
+        </div>
+    </div>
     
     <input type="file" id="fileInput" accept=".dm">
     <button id="loadButton">选择DM文件加载</button>
@@ -73,7 +116,7 @@
     </script>
     <script type="module">
         import * as THREE from 'three';
-        // import Stats from 'three/addons/libs/stats.module.js';
+        import Stats from 'three/addons/libs/stats.module.js';
         import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
         import { loadAndDisplayDMOctree } from './DMOctreeLoader.js';
 
@@ -81,6 +124,20 @@
         const statsElement = document.getElementById('stats');
         const loadButton = document.getElementById('loadButton');
         const fileInput = document.getElementById('fileInput');
+        const frustumCullingToggle = document.getElementById('frustumCullingToggle');
+        const pointSizeSlider = document.getElementById('pointSizeSlider');
+        
+        // 添加性能监控
+        const perfStats = new Stats();
+        perfStats.domElement.style.position = 'absolute';
+        perfStats.domElement.style.top = '0px';
+        perfStats.domElement.style.left = '0px';
+        document.body.appendChild(perfStats.domElement);
+        
+        // 记录性能指标
+        let lastFrameTime = 0;
+        let frameCount = 0;
+        let totalFrameTime = 0;
         
         // 场景初始化
         const scene = new THREE.Scene();
@@ -126,6 +183,68 @@
         // 文件加载处理
         let dmLoader = null;
         
+        // 控制选项处理
+        if (frustumCullingToggle) {
+            frustumCullingToggle.addEventListener('change', (event) => {
+                if (dmLoader) {
+                    dmLoader.frustumCullingEnabled = event.target.checked;
+                    console.log(`视锥剔除已${event.target.checked ? '启用' : '禁用'}`);
+                    
+                    // 如果禁用视锥剔除，恢复所有点显示
+                    if (!event.target.checked && dmLoader.lodMeshes) {
+                        const currentLevel = dmLoader._lastLODLevel !== undefined ? dmLoader._lastLODLevel : 0;
+                        const mesh = dmLoader.lodMeshes[currentLevel];
+                        if (mesh && mesh.geometry && mesh.geometry.attributes.position) {
+                            const positions = mesh.geometry.attributes.position;
+                            if (dmLoader._originalPositions && dmLoader._originalPositions[currentLevel]) {
+                                const posArray = positions.array;
+                                const originalPos = dmLoader._originalPositions[currentLevel];
+                                for (let i = 0; i < Math.min(posArray.length, originalPos.length); i++) {
+                                    posArray[i] = originalPos[i];
+                                }
+                                positions.needsUpdate = true;
+                            }
+                        }
+                    }
+                    
+                    // 更新性能统计
+                    updatePerformanceStats(event.target.checked);
+                }
+            });
+        } else {
+            console.warn("视锥剔除控件未找到");
+        }
+        
+        if (pointSizeSlider) {
+            pointSizeSlider.addEventListener('input', (event) => {
+                if (dmLoader && dmLoader.lodMeshes) {
+                    const newSize = parseFloat(event.target.value);
+                    dmLoader.lodMeshes.forEach(mesh => {
+                        if (mesh.material) {
+                            mesh.material.size = newSize;
+                            mesh.material.needsUpdate = true;
+                        }
+                    });
+                }
+            });
+        } else {
+            console.warn("点大小控件未找到");
+        }
+        
+        // 记录和显示性能变化
+        function updatePerformanceStats(isCullingEnabled) {
+            // 重置统计
+            frameCount = 0;
+            totalFrameTime = 0;
+            
+            // 延迟更新信息，以便采集到足够的样本
+            setTimeout(() => {
+                const avgFrameTime = frameCount > 0 ? totalFrameTime / frameCount : 0;
+                console.log(`性能统计 - 视锥剔除: ${isCullingEnabled ? '启用' : '禁用'}`);
+                console.log(`平均帧时间: ${avgFrameTime.toFixed(2)}ms, FPS: ${(1000 / avgFrameTime).toFixed(1)}`);
+            }, 2000);
+        }
+        
         loadButton.addEventListener('click', () => {
             fileInput.click();
         });
@@ -167,6 +286,12 @@
                 gridHelper.visible = !gridHelper.visible;
             } else if (event.key === 'a') {
                 axesHelper.visible = !axesHelper.visible;
+            } else if (event.key === 'c' && frustumCullingToggle) {
+                // 切换视锥剔除状态
+                frustumCullingToggle.checked = !frustumCullingToggle.checked;
+                // 触发change事件，调用已经绑定的处理函数
+                frustumCullingToggle.dispatchEvent(new Event('change'));
+                console.log(`键盘快捷键切换视锥剔除: ${frustumCullingToggle.checked ? '启用' : '禁用'}`);
             }
         });
 
@@ -174,25 +299,53 @@
         function animate() {
             requestAnimationFrame(animate);
             
+            const now = performance.now();
+            if (lastFrameTime > 0) {
+                const frameTime = now - lastFrameTime;
+                totalFrameTime += frameTime;
+                frameCount++;
+            }
+            lastFrameTime = now;
+            
+            // 更新性能统计
+            perfStats.update();
+            
             controls.update();
             
             // 更新状态信息
             if (dmLoader && dmLoader.lodMeshes) {
                 let visiblePoints = 0;
                 let currentLOD = -1;
+                let culledPoints = 0;
+                let totalPoints = 0;
                 
                 for (let i = 0; i < dmLoader.lodMeshes.length; i++) {
                     if (scene.children.includes(dmLoader.lodMeshes[i])) {
                         currentLOD = i;
-                        visiblePoints = dmLoader.lodMeshes[i].geometry.attributes.position.count;
+                        totalPoints = dmLoader.lodMeshes[i].geometry.attributes.position.count;
+                        
+                        // 计算可见点数
+                        if (dmLoader.frustumCullingEnabled && dmLoader.visibleNodes && dmLoader.visibleNodes[i]) {
+                            visiblePoints = dmLoader.visibleNodes[i].size;
+                            culledPoints = totalPoints - visiblePoints;
+                        } else {
+                            // 如果未启用剔除，所有点都可见
+                            visiblePoints = totalPoints;
+                            culledPoints = 0;
+                        }
                         break;
                     }
                 }
                 
+                // 计算剔除比例
+                const cullingRatio = totalPoints > 0 ? (culledPoints / totalPoints * 100).toFixed(1) : 0;
+                
                 statsElement.innerHTML = `
                     相机位置: (${camera.position.x.toFixed(0)}, ${camera.position.y.toFixed(0)}, ${camera.position.z.toFixed(0)})<br>
                     当前LOD级别: ${currentLOD}<br>
-                    可见点数: ${visiblePoints}
+                    总点数: ${totalPoints}<br>
+                    可见点数: ${visiblePoints} (${cullingRatio}% 被剔除)<br>
+                    FPS: ${Math.round(perfStats.fps)}
                 `;
             }
             
