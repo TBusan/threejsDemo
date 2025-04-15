@@ -5,22 +5,64 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>DM Octree Viewer</title>
     <style>
-        body { margin: 0; overflow: hidden; }
-        canvas { display: block; }
+        body { 
+            margin: 0; 
+            overflow: hidden; 
+            background-color: #000;
+            font-family: Arial, sans-serif;
+        }
+        canvas { 
+            display: block; 
+        }
         #info {
             position: absolute;
             top: 10px;
             width: 100%;
             text-align: center;
             color: white;
-            font-family: Arial, sans-serif;
             font-size: 14px;
             pointer-events: none;
+            z-index: 100;
+        }
+        #stats {
+            position: absolute;
+            bottom: 10px;
+            left: 10px;
+            background: rgba(0,0,0,0.5);
+            color: white;
+            padding: 10px;
+            border-radius: 5px;
+            font-size: 12px;
+            z-index: 100;
+        }
+        #fileInput {
+            display: none;
+        }
+        #loadButton {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            padding: 15px 30px;
+            background: #4CAF50;
+            color: white;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 16px;
+            z-index: 10;
+        }
+        #loadButton:hover {
+            background: #45a049;
         }
     </style>
 </head>
 <body>
-    <div id="info">DM Octree Viewer - LOD 基于相机距离动态加载</div>
+    <div id="info">DM Octree Viewer - 基于八叉树的LOD点云可视化</div>
+    <div id="stats">相机位置: (0,0,0)<br>当前LOD级别: -<br>可见点数: 0</div>
+    
+    <input type="file" id="fileInput" accept=".dm">
+    <button id="loadButton">选择DM文件加载</button>
     <script type="importmap">
         {
             "imports": {
@@ -30,13 +72,17 @@
         }
     </script>
     <script type="module">
-
         import * as THREE from 'three';
         // import Stats from 'three/addons/libs/stats.module.js';
         import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
         import { loadAndDisplayDMOctree } from './DMOctreeLoader.js';
 
-        // 初始化场景
+        // DOM元素
+        const statsElement = document.getElementById('stats');
+        const loadButton = document.getElementById('loadButton');
+        const fileInput = document.getElementById('fileInput');
+        
+        // 场景初始化
         const scene = new THREE.Scene();
         scene.background = new THREE.Color(0x111111);
 
@@ -49,13 +95,14 @@
         scene.add(directionalLight);
 
         // 设置相机
-        const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
-        camera.position.set(100, 100, 100);
+        const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 10000);
+        camera.position.set(200, 200, 200);
         camera.lookAt(0, 0, 0);
 
         // 设置渲染器
         const renderer = new THREE.WebGLRenderer({ antialias: true });
         renderer.setSize(window.innerWidth, window.innerHeight);
+        renderer.setPixelRatio(window.devicePixelRatio);
         document.body.appendChild(renderer.domElement);
 
         // 添加轨道控制
@@ -64,11 +111,48 @@
         controls.dampingFactor = 0.05;
 
         // 添加坐标轴辅助
-        const axesHelper = new THREE.AxesHelper(50);
+        const axesHelper = new THREE.AxesHelper(100);
         scene.add(axesHelper);
 
-        // 加载DM文件
-        const dmLoader = loadAndDisplayDMOctree('out.dm', scene, camera, renderer);
+        // 添加网格帮助定位
+        const gridHelper = new THREE.GridHelper(400, 40);
+        scene.add(gridHelper);
+
+        // 检测是否有WebGL支持
+        if (!renderer.capabilities.isWebGL2) {
+            alert("您的浏览器不支持WebGL2，可能无法正常显示3D内容。");
+        }
+
+        // 文件加载处理
+        let dmLoader = null;
+        
+        loadButton.addEventListener('click', () => {
+            fileInput.click();
+        });
+        
+        fileInput.addEventListener('change', (event) => {
+            if (event.target.files.length === 0) return;
+            
+            const file = event.target.files[0];
+            const url = URL.createObjectURL(file);
+            
+            // 隐藏加载按钮
+            loadButton.style.display = 'none';
+            
+            // 如果已存在加载器，清理之前的数据
+            if (dmLoader) {
+                if (dmLoader.lodMeshes) {
+                    dmLoader.lodMeshes.forEach(mesh => {
+                        if (scene.children.includes(mesh)) {
+                            scene.remove(mesh);
+                        }
+                    });
+                }
+            }
+            
+            // 加载新文件
+            dmLoader = loadAndDisplayDMOctree(url, scene, camera, renderer, controls);
+        });
 
         // 窗口大小调整
         window.addEventListener('resize', () => {
@@ -77,7 +161,52 @@
             renderer.setSize(window.innerWidth, window.innerHeight);
         });
 
-        // 主动画循环已在loadAndDisplayDMOctree内部处理
+        // 添加交互提示
+        window.addEventListener('keydown', (event) => {
+            if (event.key === 'g') {
+                gridHelper.visible = !gridHelper.visible;
+            } else if (event.key === 'a') {
+                axesHelper.visible = !axesHelper.visible;
+            }
+        });
+
+        // 动画循环
+        function animate() {
+            requestAnimationFrame(animate);
+            
+            controls.update();
+            
+            // 更新状态信息
+            if (dmLoader && dmLoader.lodMeshes) {
+                let visiblePoints = 0;
+                let currentLOD = -1;
+                
+                for (let i = 0; i < dmLoader.lodMeshes.length; i++) {
+                    if (scene.children.includes(dmLoader.lodMeshes[i])) {
+                        currentLOD = i;
+                        visiblePoints = dmLoader.lodMeshes[i].geometry.attributes.position.count;
+                        break;
+                    }
+                }
+                
+                statsElement.innerHTML = `
+                    相机位置: (${camera.position.x.toFixed(0)}, ${camera.position.y.toFixed(0)}, ${camera.position.z.toFixed(0)})<br>
+                    当前LOD级别: ${currentLOD}<br>
+                    可见点数: ${visiblePoints}
+                `;
+            }
+            
+            renderer.render(scene, camera);
+        }
+        
+        animate();
+        
+        // 初始加载一个简单对象，确认渲染系统正常工作
+        const cube = new THREE.Mesh(
+            new THREE.BoxGeometry(20, 20, 20),
+            new THREE.MeshBasicMaterial({ color: 0x00ff00, wireframe: true })
+        );
+        scene.add(cube);
     </script>
 </body>
 </html>
