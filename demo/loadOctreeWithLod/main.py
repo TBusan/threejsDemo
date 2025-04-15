@@ -2,6 +2,7 @@ import numpy as np
 import struct
 import os
 import time
+import collections
 
 class OctreeNode:
     def __init__(self, x_min, y_min, z_min, size):
@@ -37,11 +38,9 @@ class OctreeNode:
         global insert_calls, split_decisions
         insert_calls += 1
         
-        # 强制进行分裂用于测试
-        if self.depth < max_depth and self.size > min_size * 2:  # 确保至少分裂到指定的最小尺寸
-            force_split = True
-        else:
-            force_split = False
+        # 强制进行分裂，确保生成足够深度的八叉树
+        # 这对LOD非常重要，以便有足够的层级
+        force_split = self.depth < max_depth // 2 or (self.size > min_size * 3 and self.depth < max_depth)
             
         # 如果这个节点已经是叶子节点
         if self.is_leaf:
@@ -71,7 +70,7 @@ class OctreeNode:
                     self.is_leaf = True
                 return
         
-        # 如果达到最小尺寸或最大深度，设为叶子节点
+        # 如果达到最小尺寸或最大深度且不强制分裂，设为叶子节点
         if (self.size <= min_size or self.depth >= max_depth) and not force_split:
             self.value = value
             self.is_leaf = True
@@ -123,6 +122,40 @@ written_nodes = 0
 depth_distribution = {}  # 添加深度分布统计
 insert_calls = 0  # 记录insert被调用的次数
 split_decisions = 0  # 记录分裂决策的次数
+node_count_by_depth = {}  # 记录每个深度的节点数量
+
+def get_node_stats(node, stats=None, depth=0):
+    """收集八叉树的详细统计信息"""
+    if stats is None:
+        stats = {
+            'total_nodes': 0,
+            'leaf_nodes': 0,
+            'max_depth': 0,
+            'by_depth': {}
+        }
+    
+    if node is None:
+        return stats
+    
+    # 更新统计信息
+    stats['total_nodes'] += 1
+    stats['max_depth'] = max(stats['max_depth'], depth)
+    
+    # 记录每个深度的节点数
+    if depth not in stats['by_depth']:
+        stats['by_depth'][depth] = {'total': 0, 'leaves': 0}
+    stats['by_depth'][depth]['total'] += 1
+    
+    if node.is_leaf:
+        stats['leaf_nodes'] += 1
+        stats['by_depth'][depth]['leaves'] += 1
+    
+    # 递归处理子节点
+    for child in node.children:
+        if child is not None:
+            get_node_stats(child, stats, depth + 1)
+    
+    return stats
 
 def write_octree_to_binary(node, file):
     global written_nodes
@@ -310,6 +343,45 @@ def get_max_depth(node, current_depth=0):
     
     return max_child_depth
 
+def generate_sample_lod_data(octree, max_depth):
+    """生成每个深度级别的样本数据，帮助前端调试"""
+    lod_samples = []
+    
+    for depth in range(max_depth + 1):
+        # 生成每个深度级别的样本节点
+        samples = []
+        
+        def collect_nodes_at_depth(node, current_depth=0):
+            if node is None:
+                return
+                
+            if current_depth == depth:
+                # 收集此深度的节点
+                sample = {
+                    'position': [node.x_min + node.size/2, node.y_min + node.size/2, node.z_min + node.size/2],
+                    'size': node.size,
+                    'isLeaf': node.is_leaf,
+                    'value': node.value if node.is_leaf else None
+                }
+                samples.append(sample)
+                return  # 不继续向下遍历
+                
+            # 如果还没到目标深度，继续向下遍历
+            if current_depth < depth:
+                for child in node.children:
+                    if child is not None:
+                        collect_nodes_at_depth(child, current_depth + 1)
+        
+        collect_nodes_at_depth(octree)
+        
+        if samples:
+            print(f"LOD级别 {depth}: 收集了 {len(samples)} 个样本节点")
+            lod_samples.append(samples)
+        else:
+            print(f"LOD级别 {depth}: 没有找到节点")
+    
+    return lod_samples
+
 def convert_hsp_to_dm(hsp_filename, dm_filename, min_size=0.5, max_depth=8):
     global written_nodes, depth_distribution
     written_nodes = 0
@@ -335,10 +407,27 @@ def convert_hsp_to_dm(hsp_filename, dm_filename, min_size=0.5, max_depth=8):
     actual_max_depth = get_max_depth(octree)
     print(f"八叉树实际最大深度: {actual_max_depth} (设置的最大深度为: {max_depth})")
     
+    # 获取详细的八叉树统计数据
+    tree_stats = get_node_stats(octree)
+    print("\n八叉树详细统计:")
+    print(f"总节点数: {tree_stats['total_nodes']}")
+    print(f"叶子节点数: {tree_stats['leaf_nodes']}")
+    print(f"最大深度: {tree_stats['max_depth']}")
+    print("\n按深度分布:")
+    
+    # 打印每个深度的节点统计
+    for depth in sorted(tree_stats['by_depth'].keys()):
+        depth_data = tree_stats['by_depth'][depth]
+        print(f"  深度 {depth}: 总计 {depth_data['total']} 个节点, 其中叶子节点 {depth_data['leaves']} 个")
+    
+    # 生成LOD样本数据用于调试
+    lod_samples = generate_sample_lod_data(octree, actual_max_depth)
+    print(f"\n生成了 {len(lod_samples)} 个LOD级别的样本数据")
+    
     if not valid or valid_leaves == 0:
         print("警告: 八叉树结构可能有问题，没有有效的叶子节点")
     
-    print(f"正在写入二进制八叉树到 {dm_filename}...")
+    print(f"\n正在写入二进制八叉树到 {dm_filename}...")
     with open(dm_filename, 'wb') as file:
         # Write header
         file.write(b'DMOCTREE')  # Magic number
