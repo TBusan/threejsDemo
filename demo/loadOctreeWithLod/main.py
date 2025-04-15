@@ -3,6 +3,7 @@ import struct
 import os
 import time
 import collections
+import random
 
 class OctreeNode:
     def __init__(self, x_min, y_min, z_min, size):
@@ -14,6 +15,7 @@ class OctreeNode:
         self.value = None
         self.is_leaf = False
         self.depth = 0  # 添加深度信息，用于LOD生成
+        self.points = []  # 存储实际点数据，用于LOD生成
 
     def get_child_index(self, x, y, z):
         # Determine which octant the point belongs to
@@ -30,7 +32,7 @@ class OctreeNode:
             index |= 4
         return index
 
-    def insert(self, x, y, z, value, min_size=0.5, max_depth=8):
+    def insert(self, x, y, z, value, min_size=0.1, max_depth=18):
         # 添加最大深度控制，确保有足够的LOD层级
         # 降低默认最小尺寸，确保更细致的分割
         
@@ -38,9 +40,12 @@ class OctreeNode:
         global insert_calls, split_decisions
         insert_calls += 1
         
+        # 记录原始点数据，无论是否分裂都保存
+        self.points.append((x, y, z, value))
+        
         # 强制进行分裂，确保生成足够深度的八叉树
         # 这对LOD非常重要，以便有足够的层级
-        force_split = self.depth < max_depth // 2 or (self.size > min_size * 3 and self.depth < max_depth)
+        force_split = self.depth < max_depth // 3 or (self.size > min_size * 2 and self.depth < max_depth)
             
         # 如果这个节点已经是叶子节点
         if self.is_leaf:
@@ -59,7 +64,8 @@ class OctreeNode:
                 
                 # 仅当我们高于最小尺寸且未达到最大深度时才分裂
                 if (self.size > min_size and self.depth < max_depth) or force_split:
-                    print(f"分裂节点: 深度={self.depth}, 大小={self.size:.2f}, 最小需求={min_size:.2f}, 最大深度={max_depth}")
+                    if random.random() < 0.01:  # 减少日志输出
+                        print(f"分裂节点: 深度={self.depth}, 大小={self.size:.2f}, 最小需求={min_size:.2f}, 最大深度={max_depth}")
                     # 为现有值创建子节点
                     self.insert(old_x, old_y, old_z, old_value, min_size, max_depth)
                     # 为新值创建子节点
@@ -93,28 +99,61 @@ class OctreeNode:
         # 在适当的子节点中插入点
         self.children[child_index].insert(x, y, z, value, min_size, max_depth)
 
-    def get_average_value_at_depth(self, target_depth):
-        """获取特定深度的平均值，用于LOD"""
-        if self.depth == target_depth and self.is_leaf:
-            return self.value, 1
-        
-        if self.depth >= target_depth or all(child is None for child in self.children):
-            return self.value if self.is_leaf else 0, 1 if self.is_leaf else 0
+    def get_center_point(self):
+        """返回节点的中心点坐标"""
+        center_x = self.x_min + self.size / 2
+        center_y = self.y_min + self.size / 2
+        center_z = self.z_min + self.size / 2
+        return center_x, center_y, center_z
+
+    def get_representative_point(self):
+        """获取代表性点，优先使用真实数据点"""
+        if not self.points:
+            # 如果没有真实点，使用节点中心点和平均值
+            center = self.get_center_point()
+            return (*center, self.get_average_value())
+            
+        # 使用存储的真实点的中心
+        points = np.array(self.points)
+        center_idx = len(points) // 2  # 使用中间的点作为代表
+        return tuple(points[center_idx])
+    
+    def get_average_value(self):
+        """获取节点的平均值"""
+        if self.is_leaf and self.value is not None:
+            return self.value
+            
+        if self.points:
+            values = [p[3] for p in self.points]
+            return sum(values) / len(values)
             
         # 递归计算子节点的平均值
-        total_value = 0
-        total_count = 0
-        
+        values = []
         for child in self.children:
             if child is not None:
-                child_value, child_count = child.get_average_value_at_depth(target_depth)
-                if child_count > 0:
-                    total_value += child_value * child_count
-                    total_count += child_count
-                    
-        if total_count > 0:
-            return total_value / total_count, total_count
-        return 0, 0
+                values.append(child.get_average_value())
+                
+        if values:
+            return sum(values) / len(values)
+        return 0  # 默认值
+
+    def get_points_for_lod(self, target_depth):
+        """获取特定层级的LOD点, 返回格式为 [(x, y, z, value), ...]"""
+        if self.depth == target_depth:
+            # 在目标深度，返回这个节点的代表点
+            return [self.get_representative_point()]
+            
+        if self.depth > target_depth or self.is_leaf:
+            # 如果已经超过目标深度或是叶子节点，不继续向下
+            return []
+            
+        # 如果深度小于目标深度，递归获取子节点的点
+        points = []
+        for child in self.children:
+            if child is not None:
+                points.extend(child.get_points_for_lod(target_depth))
+                
+        return points
 
 # 用于记录统计信息的全局变量
 leaf_count = 0
@@ -157,12 +196,12 @@ def get_node_stats(node, stats=None, depth=0):
     
     return stats
 
-def write_octree_to_binary(node, file):
+def write_octree_to_binary(node, file, lod_data=None):
     global written_nodes
     written_nodes += 1
     
-    # Write node structure
-    # Format: [is_leaf (1 byte)][value (8 bytes, if leaf)][child_pointers (8 pointers if not leaf)]
+    # 二进制版本2：添加LOD数据支持
+    # 格式：[is_leaf (1 byte)][value (8 bytes, if leaf)][child_pointers (8 pointers if not leaf)]
     if node.is_leaf:
         file.write(struct.pack('?', True))
         file.write(struct.pack('d', node.value))
@@ -174,7 +213,7 @@ def write_octree_to_binary(node, file):
         depth_distribution[node.depth] += 1
         
         # 调试信息 - 输出叶子节点信息
-        if written_nodes % 1000 == 0 or written_nodes < 20:
+        if written_nodes % 10000 == 0 or written_nodes < 10:
             print(f"写入叶子节点 #{written_nodes}: 位置=({node.x_min:.2f},{node.y_min:.2f},{node.z_min:.2f}), 大小={node.size:.2f}, 值={node.value:.4f}, 深度={node.depth}")
     else:
         file.write(struct.pack('?', False))
@@ -202,7 +241,65 @@ def write_octree_to_binary(node, file):
                 file.seek(current_position)
                 
                 # 写入子节点
-                write_octree_to_binary(node.children[i], file)
+                write_octree_to_binary(node.children[i], file, lod_data)
+
+def write_octree_with_lod(root, filename, max_lod_depth=18):
+    """将八叉树写入DM文件，包括LOD数据"""
+    data = []
+    bounds_min = [root.x_min, root.y_min, root.z_min]
+    bounds_max = [root.x_min + root.size, root.y_min + root.size, root.z_min + root.size]
+    
+    # 预先生成LOD数据
+    print("正在为各层级生成LOD数据...")
+    lod_data = []
+    for depth in range(max_lod_depth + 1):
+        points = root.get_points_for_lod(depth)
+        if points:
+            print(f"LOD级别 {depth}: 生成了 {len(points)} 个点")
+            lod_data.append(points)
+        else:
+            print(f"LOD级别 {depth}: 没有点")
+    
+    with open(filename, 'wb') as file:
+        # 文件头
+        file.write(b'DMOCTREE')  # 魔数
+        file.write(struct.pack('I', 2))  # 版本2: 添加LOD支持
+        
+        # 边界
+        for value in bounds_min:
+            file.write(struct.pack('d', value))
+        for value in bounds_max:
+            file.write(struct.pack('d', value))
+        
+        # 写入LOD数据部分
+        lod_section_offset = file.tell() + 8  # 为根节点偏移量留出空间
+        file.write(struct.pack('Q', lod_section_offset))
+        
+        # 写入根节点结构
+        write_octree_to_binary(root, file)
+        
+        # 记录当前位置，用于写入LOD节
+        lod_section_start = file.tell()
+        
+        # 回到LOD部分偏移位置，写入正确的偏移
+        file.seek(lod_section_offset - 8)
+        file.write(struct.pack('Q', lod_section_start))
+        
+        # 返回LOD部分开始写入
+        file.seek(lod_section_start)
+        
+        # 写入LOD数据
+        file.write(struct.pack('I', len(lod_data)))  # LOD级别数量
+        
+        for level, points in enumerate(lod_data):
+            file.write(struct.pack('I', level))  # LOD级别
+            file.write(struct.pack('I', len(points)))  # 此级别的点数量
+            
+            for point in points:
+                x, y, z, value = point
+                file.write(struct.pack('dddd', x, y, z, value))  # 写入点数据
+        
+        print(f"总共写入了 {len(lod_data)} 个LOD级别")
 
 def read_hsp_file(filename):
     data = []
@@ -221,7 +318,7 @@ def read_hsp_file(filename):
                     data.append((x, y, z, v))
                     
                     # 打印一些样本数据
-                    if line_count <= 5 or line_count % 10000 == 0:
+                    if line_count <= 5 or line_count % 100000 == 0:
                         print(f"读取点 #{line_count}: ({x}, {y}, {z}) = {v}")
                         
                 except ValueError:
@@ -257,12 +354,19 @@ def count_leaves_by_depth(node, stats=None, depth=0):
     
     return stats
 
-def build_octree(data, min_size=0.5, max_depth=8):
+def build_octree(data, min_size=0.1, max_depth=18):
     global leaf_count, insert_calls, split_decisions
     insert_calls = 0
     split_decisions = 0
     
     start_time = time.time()
+    
+    # 对点进行随机采样，提高分布均匀性
+    if len(data) > 1000000:  # 如果超过百万级点，进行随机采样
+        sample_ratio = min(1.0, 1000000 / len(data))
+        indices = np.random.choice(len(data), size=int(len(data) * sample_ratio), replace=False)
+        data = data[indices]
+        print(f"由于点数过多，采样至 {len(data)} 个点")
     
     # Find the bounding box
     x_min, y_min, z_min = data[:, 0].min(), data[:, 1].min(), data[:, 2].min()
@@ -288,7 +392,7 @@ def build_octree(data, min_size=0.5, max_depth=8):
     for idx, (x, y, z, v) in enumerate(data):
         root.insert(x, y, z, v, min_size, max_depth)
         leaf_count += 1
-        if idx % 10000 == 0:
+        if idx % 50000 == 0:
             print(f"已插入 {idx+1}/{len(data)} 个点")
     
     end_time = time.time()
@@ -357,13 +461,42 @@ def generate_sample_lod_data(octree, max_depth):
                 
             if current_depth == depth:
                 # 收集此深度的节点
-                sample = {
-                    'position': [node.x_min + node.size/2, node.y_min + node.size/2, node.z_min + node.size/2],
-                    'size': node.size,
-                    'isLeaf': node.is_leaf,
-                    'value': node.value if node.is_leaf else None
-                }
-                samples.append(sample)
+                center_x, center_y, center_z = node.get_center_point()
+                # 优先使用真实点
+                if node.points:
+                    # 采样节点中的真实点，确保均匀分布
+                    if len(node.points) > 1:
+                        # 获取均匀分布的样本
+                        step = len(node.points) // min(5, len(node.points))
+                        step = max(1, step)
+                        for i in range(0, len(node.points), step):
+                            point = node.points[i]
+                            sample = {
+                                'position': [point[0], point[1], point[2]],
+                                'size': node.size,
+                                'isLeaf': node.is_leaf,
+                                'value': point[3]
+                            }
+                            samples.append(sample)
+                    else:
+                        # 只有一个点的情况
+                        point = node.points[0]
+                        sample = {
+                            'position': [point[0], point[1], point[2]],
+                            'size': node.size,
+                            'isLeaf': node.is_leaf,
+                            'value': point[3]
+                        }
+                        samples.append(sample)
+                else:
+                    # 没有真实点，使用节点中心
+                    sample = {
+                        'position': [center_x, center_y, center_z],
+                        'size': node.size,
+                        'isLeaf': node.is_leaf,
+                        'value': node.get_average_value()
+                    }
+                    samples.append(sample)
                 return  # 不继续向下遍历
                 
             # 如果还没到目标深度，继续向下遍历
@@ -382,7 +515,7 @@ def generate_sample_lod_data(octree, max_depth):
     
     return lod_samples
 
-def convert_hsp_to_dm(hsp_filename, dm_filename, min_size=0.5, max_depth=8):
+def convert_hsp_to_dm(hsp_filename, dm_filename, min_size=0.1, max_depth=18):
     global written_nodes, depth_distribution
     written_nodes = 0
     depth_distribution = {}
@@ -421,31 +554,15 @@ def convert_hsp_to_dm(hsp_filename, dm_filename, min_size=0.5, max_depth=8):
         print(f"  深度 {depth}: 总计 {depth_data['total']} 个节点, 其中叶子节点 {depth_data['leaves']} 个")
     
     # 生成LOD样本数据用于调试
-    lod_samples = generate_sample_lod_data(octree, actual_max_depth)
+    lod_samples = generate_sample_lod_data(octree, min(actual_max_depth, max_depth))
     print(f"\n生成了 {len(lod_samples)} 个LOD级别的样本数据")
     
     if not valid or valid_leaves == 0:
         print("警告: 八叉树结构可能有问题，没有有效的叶子节点")
     
-    print(f"\n正在写入二进制八叉树到 {dm_filename}...")
-    with open(dm_filename, 'wb') as file:
-        # Write header
-        file.write(b'DMOCTREE')  # Magic number
-        file.write(struct.pack('I', 1))  # Version
-        
-        # Write data dimensions
-        x_min, y_min, z_min = data[:, 0].min(), data[:, 1].min(), data[:, 2].min()
-        x_max, y_max, z_max = data[:, 0].max(), data[:, 1].max(), data[:, 2].max()
-        
-        file.write(struct.pack('ddd', x_min, y_min, z_min))  # Min bounds
-        file.write(struct.pack('ddd', x_max, y_max, z_max))  # Max bounds
-        
-        # Write the offset to the root node
-        root_offset = file.tell() + 8  # 8 bytes for the offset itself
-        file.write(struct.pack('Q', root_offset))
-        
-        # Write the octree structure
-        write_octree_to_binary(octree, file)
+    print(f"\n正在写入增强版二进制八叉树(含LOD数据)到 {dm_filename}...")
+    # 使用新的写入函数，支持LOD数据
+    write_octree_with_lod(octree, dm_filename, min(actual_max_depth, max_depth))
     
     print(f"转换完成. 输出已保存到 {dm_filename}")
     print(f"总共写入 {written_nodes} 个节点")
@@ -466,15 +583,15 @@ if __name__ == "__main__":
         print("用法: python main.py input.hsp output.dm [min_size] [max_depth]")
         hsp_file = input("请输入.hsp文件的路径: ")
         dm_file = input("请输入输出.dm文件的路径: ")
-        min_size_str = input("请输入最小节点尺寸 (默认: 0.5): ").strip()
-        min_size = float(min_size_str) if min_size_str else 0.5
-        max_depth_str = input("请输入最大深度 (默认: 8): ").strip()
-        max_depth = int(max_depth_str) if max_depth_str else 8
+        min_size_str = input("请输入最小节点尺寸 (默认: 0.1): ").strip()
+        min_size = float(min_size_str) if min_size_str else 0.1
+        max_depth_str = input("请输入最大深度 (默认: 18): ").strip()
+        max_depth = int(max_depth_str) if max_depth_str else 18
     else:
         hsp_file = sys.argv[1]
         dm_file = sys.argv[2]
-        min_size = float(sys.argv[3]) if len(sys.argv) > 3 else 0.5
-        max_depth = int(sys.argv[4]) if len(sys.argv) > 4 else 8
+        min_size = float(sys.argv[3]) if len(sys.argv) > 3 else 0.1
+        max_depth = int(sys.argv[4]) if len(sys.argv) > 4 else 18
     
     # 尝试不同参数测试变化
     print("\n==========================================")
