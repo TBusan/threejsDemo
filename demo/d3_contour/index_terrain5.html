@@ -101,41 +101,7 @@
 				.domain(d3.extent(contours, (d) => d.value))
 				.interpolator(d3.interpolateYlGnBu);
 
-			// // 创建离屏 Canvas 进行纹理渲染
-			// const textureCanvas = document.createElement('canvas');
-			// textureCanvas.width = resolution;
-			// textureCanvas.height = resolution;
-			// const ctx = textureCanvas.getContext('2d');
-
-			// // 清除背景
-			// ctx.fillStyle = '#ffffff';
-			// ctx.fillRect(0, 0, resolution, resolution);
-
-			// // 对 Canvas 进行缩放以匹配分辨率
-			// const scaleX = resolution / width;
-			// const scaleY = resolution / height;
-			// ctx.scale(scaleX, scaleY);
-
-			// // 绘制等值线到 Canvas
-			// const path = d3.geoPath().context(ctx);
-
-			// // 先绘制所有填充区域
-			// contours.forEach(d => {
-			//     ctx.beginPath();
-			//     path(d);
-			//     ctx.fillStyle = colorScale(d.value);
-			//     ctx.fill();
-			// });
-
-			// // 再绘制所有线条
-			// contours.forEach(d => {
-			//     ctx.beginPath();
-			//     path(d);
-			//     ctx.strokeStyle = 'rgba(0,0,0,0.3)';
-			//     ctx.lineWidth = 0.5;
-			//     ctx.stroke();
-			// });
-
+		
 			// ===== Three.js 部分：3D 渲染 =====
 
 			// 设置 Three.js 场景
@@ -167,25 +133,11 @@
 			stats.domElement.style.position = "absolute";
 			stats.domElement.style.top = "0px";
 			document.getElementById("container").appendChild(stats.domElement);
-			// // 创建从 Canvas 纹理
-			// const texture = new THREE.CanvasTexture(textureCanvas);
-			// texture.needsUpdate = true;
-
-			// // 创建基础平面材质
-			// const material = new THREE.MeshBasicMaterial({
-			//     map: texture,
-			//     side: THREE.DoubleSide
-			// });
+		
 
 			// // 创建平面几何体（保持1:1比例）
 			const aspectRatio = width / height;
-			// const planeGeometry = new THREE.PlaneGeometry(1 * aspectRatio, 1);
-
-			// // 创建网格
-			// const plane = new THREE.Mesh(planeGeometry, material);
-			// // 将底部平面向下移动一点，避免与等值线层发生深度冲突
-			// plane.position.z = -0.01;
-			// scene.add(plane);
+		
 
 			// 保存所有等值线网格的引用，以便更新
 			const contourMeshes = [];
@@ -226,7 +178,7 @@
 						const shape = new THREE.Shape();
 
 						// 处理外环（第一个点集）
-						const outerRing = simplifyPoints(polygon[0], 0.5);
+						const outerRing = polygon[0];
 
 						// 外环点集构建主形状
 						outerRing.forEach((point, j) => {
@@ -243,7 +195,7 @@
 						// 处理内环（如果有的话）
 						if (polygon.length > 1) {
 							for (let h = 1; h < polygon.length; h++) {
-								const holePoints = simplifyPoints(polygon[h], 0.5);
+								const holePoints = polygon[h];
 								const holePath = new THREE.Path();
 
 								holePoints.forEach((point, j) => {
@@ -297,7 +249,7 @@
 								// 为下一级等值线创建一个反向填充区域
 								// 这会覆盖上一级区域，形成边界清晰的环
 								const nextShape = new THREE.Shape();
-								const nextRing = simplifyPoints(nextPolygon[0], 0.5);
+								const nextRing = nextPolygon[0];
 
 								nextRing.forEach((point, j) => {
 									const x = (point[0] / width - 0.5) * aspectRatio;
@@ -374,7 +326,7 @@
 							// 绘制内环轮廓线
 							if (polygon.length > 1) {
 								for (let h = 1; h < polygon.length; h++) {
-									const holePoints = simplifyPoints(polygon[h], 0.5);
+									const holePoints = polygon[h];
 									let holeLinePoints = [];
 
 									holePoints.forEach((point) => {
@@ -453,31 +405,6 @@
 			}
 
 			animate();
-
-			// 点集简化函数
-			function simplifyPoints(points, tolerance) {
-				if (points.length <= 2) return points;
-
-				// 简单距离函数
-				const distSquared = (p1, p2) => {
-					const dx = p1[0] - p2[0];
-					const dy = p1[1] - p2[1];
-					return dx * dx + dy * dy;
-				};
-
-				const result = [points[0]];
-				let lastPoint = points[0];
-
-				for (let i = 1; i < points.length - 1; i++) {
-					if (distSquared(points[i], lastPoint) > tolerance * tolerance) {
-						result.push(points[i]);
-						lastPoint = points[i];
-					}
-				}
-
-				result.push(points[points.length - 1]);
-				return result;
-			}
 		</script>
 	</body>
 </html>
