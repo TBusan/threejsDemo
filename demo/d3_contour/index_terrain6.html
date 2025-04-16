@@ -142,13 +142,13 @@
 			// 保存所有等值线网格的引用，以便更新
 			const contourMeshes = [];
 
-			// 渲染模式变量
+			// 性能相关变量
 			let useHighPerformanceMode = false;
 			const materialCache = new Map(); // 缓存材质以减少创建开销
 			
 			// 获取或创建材质（避免重复创建相同材质）
-			function getMaterial(color, isLine = false, renderIndex = 0) {
-				const key = color.toString() + (isLine ? '_line' : '_mesh') + '_' + renderIndex;
+			function getMaterial(color, isLine = false) {
+				const key = color.toString() + (isLine ? '_line' : '_mesh');
 				
 				if (materialCache.has(key)) {
 					return materialCache.get(key);
@@ -162,7 +162,7 @@
 						depthTest: false,
 						depthWrite: false,
 						transparent: true,
-						opacity: 0.9,
+						opacity: 1.0,
 					});
 				} else {
 					material = new THREE.MeshPhongMaterial({
@@ -173,8 +173,8 @@
 						depthWrite: false,
 						depthTest: true,
 						polygonOffset: true,
-						polygonOffsetFactor: renderIndex * 0.5,
-						polygonOffsetUnits: renderIndex * 0.5,
+						polygonOffsetFactor: 0.1,
+						polygonOffsetUnits: 0.1,
 					});
 				}
 				
@@ -219,8 +219,10 @@
 				});
 				contourMeshes.length = 0;
 				
-				// 清空材质缓存重新开始
-				materialCache.clear();
+				// 在高性能模式下清空材质缓存
+				if (useHighPerformanceMode) {
+					materialCache.clear();
+				}
 
 				// ===== 为每个等值线创建填充区域和环状线框 =====
 
@@ -230,6 +232,10 @@
 				
 				// 确定要渲染的等值线
 				let contoursToRender = contours;
+				if (useHighPerformanceMode) {
+					// 在高性能模式下仅渲染一半的等值线
+					contoursToRender = contours.filter((_, i) => i % 2 === 0);
+				}
 
 				// 完全不同的渲染方法：由外向内渲染，确保相邻等值面有细微高度差
 				// 从最低等值线开始，逐级向内绘制
@@ -241,8 +247,11 @@
 					// 针对多个等值线区域的处理
 					// 每个区域作为单独的片段处理，避免复杂相交结构
 					
-					// 每个等值线的所有形状分别处理，不尝试合并（避免串面）
-					const shapes = [];
+					// 在高性能模式下，为每个等值线使用单个几何体合并多个区域
+					let combinedShape = null;
+					if (useHighPerformanceMode) {
+						combinedShape = new THREE.Shape();
+					}
 
 					for (
 						let polygonIndex = 0;
@@ -250,21 +259,21 @@
 						polygonIndex++
 					) {
 						// 在高性能模式下，跳过小于特定大小的多边形
-						if (useHighPerformanceMode && contour.coordinates[polygonIndex][0].length < 8) {
+						if (useHighPerformanceMode && contour.coordinates[polygonIndex][0].length < 10) {
 							continue;
 						}
 						
 						const polygon = contour.coordinates[polygonIndex];
 
 						// 创建形状
-						const shape = new THREE.Shape();
+						const shape = useHighPerformanceMode ? combinedShape : new THREE.Shape();
 
 						// 处理外环（第一个点集）
 						const outerRing = polygon[0];
 						
 						// 在高性能模式下，减少点的数量
 						const pointsToUse = useHighPerformanceMode 
-							? outerRing.filter((_, idx) => idx % 3 === 0 || idx === outerRing.length - 1)
+							? outerRing.filter((_, idx) => idx % 2 === 0) 
 							: outerRing;
 
 						// 外环点集构建主形状
@@ -301,10 +310,7 @@
 							}
 						}
 						
-						// 收集每个形状以后续处理
-						shapes.push(shape);
-
-						// 在高性能模式下，不为每个形状创建Mesh，而是在循环结束后一次性处理
+						// 如果使用高性能模式，跳过单个形状创建，在循环结束后创建组合形状
 						if (useHighPerformanceMode) {
 							continue;
 						}
@@ -312,8 +318,9 @@
 						// 使用平面几何体
 						const contourGeometry = new THREE.ShapeGeometry(shape);
 
+						// 创建材质
 						// 使用缓存材质系统
-						const contourMaterial = getMaterial(colorScale(contour.value), false, i);
+						const contourMaterial = getMaterial(colorScale(contour.value));
 
 						// 创建网格并添加到场景
 						const contourMesh = new THREE.Mesh(
@@ -351,7 +358,7 @@
 
 								const nextGeometry = new THREE.ShapeGeometry(nextShape);
 								// 使用缓存材质系统
-								const nextMaterial = getMaterial(colorScale(nextContour.value), false, i);
+								const nextMaterial = getMaterial(colorScale(nextContour.value));
 
 								const nextMesh = new THREE.Mesh(nextGeometry, nextMaterial);
 								nextMesh.position.z = 0; // 位于完全相同的平面
@@ -363,7 +370,7 @@
 
 						// 绘制轮廓线
 						// 在高性能模式下，减少轮廓线的绘制
-						if (showContourLines) {
+						if (showContourLines && (!useHighPerformanceMode || i % 2 === 0)) {
 							// 创建线条几何体
 							const points = [];
 
@@ -393,7 +400,7 @@
 							line.position.z = 0; // 将线条放在与面相同的Z位置，紧贴等值面
 
 							// 线的渲染顺序高于所有面
-							line.renderOrder = 10000 + i * 10; // 极高的渲染顺序值确保线条始终在最上层
+							line.renderOrder = 10000 + i; // 极高的渲染顺序值确保线条始终在最上层
 							scene.add(line);
 							contourMeshes.push(line);
 
@@ -432,7 +439,7 @@
 									// 使用与外环相同的Z轴偏移
 									holeLine.position.z = 0; // 将内环线条放在与面相同的Z位置，紧贴等值面
 
-									holeLine.renderOrder = 10000 + i * 10; // 极高的渲染顺序值
+									holeLine.renderOrder = 10000 + i; // 极高的渲染顺序值
 									scene.add(holeLine);
 									contourMeshes.push(holeLine);
 								}
@@ -440,45 +447,16 @@
 						}
 					}
 					
-					// 如果使用高性能模式，分别为每个形状创建Mesh
-					if (useHighPerformanceMode && shapes.length > 0) {
-						shapes.forEach((shape, shapeIndex) => {
-							const contourGeometry = new THREE.ShapeGeometry(shape);
-							const contourMaterial = getMaterial(colorScale(contour.value), false, i);
-							const contourMesh = new THREE.Mesh(contourGeometry, contourMaterial);
-							
-							// 给每个等值线一个很小的z偏移，确保正确的层叠顺序
-							contourMesh.position.z = i * 0.001;
-							contourMesh.renderOrder = 1000 + i;
-							scene.add(contourMesh);
-							contourMeshes.push(contourMesh);
-							
-							// 为每个形状添加轮廓线，确保高性能模式下也有线条
-							if (showContourLines) {
-								const linePoints = [];
-								// 从形状中提取点（这里简化处理，只获取外环）
-								for (let j = 0; j < shape.curves.length; j++) {
-									const curve = shape.curves[j];
-									if (curve.v1) linePoints.push(new THREE.Vector3(curve.v1.x, curve.v1.y, 0));
-								}
-								
-								// 闭合轮廓
-								if (linePoints.length > 0 && shape.curves.length > 0) {
-									const lastCurve = shape.curves[shape.curves.length - 1];
-									if (lastCurve.v2) linePoints.push(new THREE.Vector3(lastCurve.v2.x, lastCurve.v2.y, 0));
-								}
-								
-								if (linePoints.length > 2) {
-									const lineGeometry = new THREE.BufferGeometry().setFromPoints(linePoints);
-									const lineMaterial = getMaterial(0x000000, true);
-									const line = new THREE.Line(lineGeometry, lineMaterial);
-									line.position.z = i * 0.001 + 0.0005; // 线条略高于面
-									line.renderOrder = 10000 + i * 10;
-									scene.add(line);
-									contourMeshes.push(line);
-								}
-							}
-						});
+					// 如果使用高性能模式，创建合并后的形状
+					if (useHighPerformanceMode && combinedShape) {
+						const combinedGeometry = new THREE.ShapeGeometry(combinedShape);
+						const combinedMaterial = getMaterial(colorScale(contour.value));
+						const combinedMesh = new THREE.Mesh(combinedGeometry, combinedMaterial);
+						
+						combinedMesh.position.z = 0;
+						combinedMesh.renderOrder = 1000 + i;
+						scene.add(combinedMesh);
+						contourMeshes.push(combinedMesh);
 					}
 				}
 			}
