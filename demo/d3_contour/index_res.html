@@ -540,7 +540,7 @@
                     }
                     
                     // 创建材质 - 使用从色阶获取的颜色
-                    const contourMaterial = new THREE.MeshPhongMaterial({
+                    const contourMaterial = new THREE.MeshBasicMaterial({
                         color: new THREE.Color(getColorScale(contour.value)),
                         transparent: false, // 禁用透明度以避免重叠问题
                         side: THREE.DoubleSide,
@@ -555,17 +555,17 @@
                     let zPosition;
                     if (enableExtrusion) {
                         // 挤压模式: 使用固定间隙
-                        zPosition = Math.max(0.005, i * layerGap);
+                        zPosition = 0.01 + (i * layerGap * 2);
                         contourMesh.position.z = zPosition;
                     } else {
                         // 非挤压模式: 使用递增的Z值，确保渲染顺序正确
                         // 增加索引的Z偏移，让高值区域在上方
-                        zPosition = 0.001 + (i * 0.0001);
+                        zPosition = 0.005 + (i * 0.001);
                         contourMesh.position.z = zPosition;
                     }
                     
                     // 设置明确的渲染顺序
-                    contourMesh.renderOrder = i;
+                    contourMesh.renderOrder = contours.length - i;
                     scene.add(contourMesh);
                     contourMeshes.push(contourMesh);
                     
