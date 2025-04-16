@@ -255,15 +255,22 @@
 				
 				// 合并几何体的缓存，按值分组
 				const geometriesByValue = useMergedGeometry ? new Map() : null;
-				// 合并轮廓线几何体
-				const lineGeometriesByValue = (useMergedGeometry && showContourLines) ? new Map() : null;
 				
 				// 获取每个等值线的高度值
 				const heightScale = 0.05; // 整体高度比例
 				const layerGap = 0.002; // 减小层间距
+				const lineZOffset = 0.002; // 增加线条Z轴偏移值
 				const minValue = d3.min(contours, (d) => d.value);
 				const maxValue = d3.max(contours, (d) => d.value);
 				
+				// 单一线条材质，所有轮廓线共用
+				const lineMaterial = new THREE.LineBasicMaterial({
+					color: 0x000000,
+					linewidth: 2,
+					transparent: false,
+					depthTest: false, // 禁用深度测试确保线条总是可见
+				});
+
 				// 按照值从小到大遍历，这样可以确保高值区域在上方
 				contours.forEach((contour, i) => {
 					// 获取归一化高度值
@@ -275,10 +282,6 @@
 					if (useMergedGeometry) {
 						if (!geometriesByValue.has(contour.value)) {
 							geometriesByValue.set(contour.value, []);
-						}
-						// 同时为轮廓线初始化
-						if (showContourLines && !lineGeometriesByValue.has(contour.value)) {
-							lineGeometriesByValue.set(contour.value, []);
 						}
 					}
 					
@@ -347,8 +350,8 @@
 							// 应用位置变换
 							const matrix = new THREE.Matrix4();
 							const zPosition = enableExtrusion ? 
-								Math.max(0.005, i * layerGap) : 
-								0.001 + i * 0.0001;
+								Math.max(0.005, i * layerGap) + (extrudeHeight + lineZOffset) : 
+								lineZOffset + (normalizedValue * 0.01); // 根据值设置Z偏移，让高值更靠上
 							matrix.makeTranslation(0, 0, zPosition);
 							contourGeometry.applyMatrix4(matrix);
 							
@@ -393,118 +396,71 @@
 						
 						// 绘制轮廓线
 						if (showContourLines) {
-							// 创建线条几何体
-							const points = [];
-							
-							// 添加外环轮廓线
-							outerRing.forEach((point) => {
+							// 为每个轮廓线创建单独的闭合线环
+							// 创建外环轮廓线（确保是闭合的）
+							const outerRingPoints = [];
+							for (let j = 0; j < outerRing.length; j++) {
+								const point = outerRing[j];
 								const x = point[0] - size / 2;
 								const y = -(point[1] - size / 2);
-								points.push(new THREE.Vector3(x, y, 0));
-							});
-							
-							// 闭合路径
-							if (points.length > 0) {
-								const firstPoint = points[0];
-								points.push(new THREE.Vector3(firstPoint.x, firstPoint.y, 0));
+								outerRingPoints.push(new THREE.Vector3(x, y, 0));
 							}
 							
-							const lineGeometry = new THREE.BufferGeometry().setFromPoints(
-								points
-							);
-							// 对于合并几何体模式
-							if (useMergedGeometry) {
-								// 应用位置变换
-								const matrix = new THREE.Matrix4();
-								const zPosition = enableExtrusion ? 
-									Math.max(0.005, i * layerGap) + (extrudeHeight + 0.0005) : 
-									0.001 + i * 0.0001 + 0.0005;
-								matrix.makeTranslation(0, 0, zPosition);
-								lineGeometry.applyMatrix4(matrix);
-								
-								// 添加到相同值的轮廓线几何体组
-								lineGeometriesByValue.get(contour.value).push(lineGeometry);
-							} 
-							else {
-								const lineMaterial = new THREE.LineBasicMaterial({
-									color: 0x000000,
-									linewidth: 2,
-									depthTest: false, // 始终绘制线，不进行深度测试
-								});
-								
-								const line = new THREE.Line(lineGeometry, lineMaterial);
-								
-								// 线的Z位置, 稍微高于对应面
-								if (enableExtrusion) {
-									line.position.z =
-										Math.max(0.005, i * layerGap) + (extrudeHeight + 0.0005);
-								} else {
-									line.position.z = 0.001 + i * 0.0001 + 0.0005;
-								}
-								
-								// 线的渲染顺序高于所有面
-								line.renderOrder = contours.length + i;
-								
-								scene.add(line);
-								contourMeshes.push(line);
+							// 闭合环 - 添加第一个点
+							if (outerRingPoints.length > 0) {
+								const firstPoint = outerRingPoints[0];
+								outerRingPoints.push(new THREE.Vector3(firstPoint.x, firstPoint.y, 0));
 							}
+							
+							// 使用闭合的点集创建轮廓线几何体
+							const outerLineGeometry = new THREE.BufferGeometry().setFromPoints(outerRingPoints);
+							const outerLine = new THREE.Line(outerLineGeometry, lineMaterial);
+							
+							// 设置Z位置，确保线在面的上方
+							const lineZ = enableExtrusion ? 
+								Math.max(0.005, i * layerGap) + extrudeHeight + lineZOffset : 
+								lineZOffset + (normalizedValue * 0.01);
+								
+							outerLine.position.z = lineZ;
+							
+							// 设置很高的渲染顺序确保在所有面之上
+							outerLine.renderOrder = 1000 + i;
+							
+							scene.add(outerLine);
+							contourMeshes.push(outerLine);
 							
 							// 绘制内环轮廓线
 							if (polygon.length > 1) {
 								for (let h = 1; h < polygon.length; h++) {
 									const holePoints = polygon[h];
-									let holeLinePoints = [];
+									const holeLinePoints = [];
 									
-									holePoints.forEach((point) => {
+									// 为每个内环创建点
+									for (let p = 0; p < holePoints.length; p++) {
+										const point = holePoints[p];
 										const x = point[0] - size / 2;
 										const y = -(point[1] - size / 2);
 										holeLinePoints.push(new THREE.Vector3(x, y, 0));
-									});
+									}
 									
 									// 闭合内环
 									if (holeLinePoints.length > 0) {
 										const firstHolePoint = holeLinePoints[0];
-										holeLinePoints.push(
-											new THREE.Vector3(firstHolePoint.x, firstHolePoint.y, 0)
-										);
+										holeLinePoints.push(new THREE.Vector3(firstHolePoint.x, firstHolePoint.y, 0));
 									}
 									
-									const holeGeometry = new THREE.BufferGeometry().setFromPoints(
-										holeLinePoints
-									);
-									// 对于合并几何体模式
-									if (useMergedGeometry) {
-										// 应用位置变换
-										const matrix = new THREE.Matrix4();
-										const zPosition = enableExtrusion ? 
-											Math.max(0.005, i * layerGap) + (extrudeHeight + 0.0005) : 
-											0.001 + i * 0.0001 + 0.0005;
-										matrix.makeTranslation(0, 0, zPosition);
-										holeGeometry.applyMatrix4(matrix);
-										
-										// 添加到相同值的轮廓线几何体组
-										lineGeometriesByValue.get(contour.value).push(holeGeometry);
-									} 
-									else {
-										const lineMaterial = new THREE.LineBasicMaterial({
-											color: 0x000000,
-											linewidth: 2,
-											depthTest: false,
-										});
-										const holeLine = new THREE.Line(holeGeometry, lineMaterial);
-										
-										// 设置与外环轮廓线相同的Z位置
-										if (enableExtrusion) {
-											holeLine.position.z =
-												Math.max(0.005, i * layerGap) + (extrudeHeight + 0.0005);
-										} else {
-											holeLine.position.z = 0.001 + i * 0.0001 + 0.0005;
-										}
-										
-										holeLine.renderOrder = contours.length + i;
-										scene.add(holeLine);
-										contourMeshes.push(holeLine);
-									}
+									// 创建内环轮廓线几何体
+									const holeGeometry = new THREE.BufferGeometry().setFromPoints(holeLinePoints);
+									const holeLine = new THREE.Line(holeGeometry, lineMaterial);
+									
+									// 设置与外环轮廓线相同的Z位置
+									holeLine.position.z = lineZ;
+									
+									// 设置很高的渲染顺序确保在所有面之上
+									holeLine.renderOrder = 1000 + i;
+									
+									scene.add(holeLine);
+									contourMeshes.push(holeLine);
 								}
 							}
 						}
@@ -545,36 +501,6 @@
 							geometries.forEach(geo => geo.dispose());
 						}
 					});
-
-					// 处理合并轮廓线
-					if (showContourLines && lineGeometriesByValue) {
-						lineGeometriesByValue.forEach((geometries, value) => {
-							if (geometries.length > 0) {
-								// 合并同一值的所有轮廓线几何体
-								const mergedLineGeometry = mergeGeometries(geometries);
-								
-								// 创建线材质
-								const lineMaterial = new THREE.LineBasicMaterial({
-									color: 0x000000,
-									linewidth: 2,
-									depthTest: false,
-								});
-								
-								// 创建合并后的线网格
-								const lineMesh = new THREE.LineSegments(mergedLineGeometry, lineMaterial);
-								
-								// 设置渲染顺序
-								const i = Array.from(lineGeometriesByValue.keys()).indexOf(value);
-								lineMesh.renderOrder = contours.length + i;
-								
-								scene.add(lineMesh);
-								contourMeshes.push(lineMesh);
-								
-								// 释放临时几何体内存
-								geometries.forEach(geo => geo.dispose());
-							}
-						});
-					}
 				}
 			}
 
