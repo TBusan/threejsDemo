@@ -42,6 +42,7 @@
             }
         }
     </script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/stats.js/r17/Stats.min.js"></script>
     <script type="module">
         // ===== D3.js 部分：生成等值线数据 =====
         import * as THREE from 'three';
@@ -54,140 +55,123 @@
         let enableExtrusion = true; // 默认启用挤压效果
         let showContourLines = true; // 显示等值线轮廓
 
-        // 生成随机数据（高斯分布）
-        const generateData = (n, mean, variance) => {
-            return Array.from({ length: n }, () => {
-                return [
-                    mean[0] + d3.randomNormal(0, variance)(),
-                    mean[1] + d3.randomNormal(0, variance)()
-                ];
-            });
-        };
-
-        // 创建混合数据集
-        const data = [
-            ...generateData(500, [0.3, 0.3], 0.1),
-            ...generateData(300, [0.7, 0.7], 0.08),
-            ...generateData(200, [0.4, 0.7], 0.05)
-        ];
-
-        // 创建密度计算器
-        const density = d3.contourDensity()
-            .x(d => d[0] * width)
-            .y(d => d[1] * height)
-            .size([width, height])
-            .bandwidth(20)
-            .thresholds(20);
-
-        // 计算等值线
-        let contours = density(data);
+        // 生成网格基础数据
+        function generateGridData(nx, ny) {
+            // 创建均匀网格
+            const data = [];
+            for (let j = 0; j < ny; j++) {
+                for (let i = 0; i < nx; i++) {
+                    data.push([i / (nx - 1), j / (ny - 1)]);
+                }
+            }
+            return data;
+        }
         
-        // 按照值从小到大排序
+        // 基于网格计算值
+        function computeGridValues(gridData, nx, ny) {
+            // 创建值数组
+            const values = new Array(gridData.length);
+            
+            // 创建更加自然流动的等值线图案
+            for (let i = 0; i < gridData.length; i++) {
+                const x = gridData[i][0];
+                const y = gridData[i][1];
+                
+                // 使用多个不同频率的正弦波叠加来模拟柏林噪声
+                // 基础波
+                let value = 0;
+                value += 70 * Math.sin(6.2 * x + 3.6 * y) + 70 * Math.cos(5.7 * y - 2.9 * x);
+                
+                // 高频细节波 - 添加小的变化
+                value += 30 * Math.sin(12.2 * x + 13.7 * Math.sin(4.0 * y)) + 30 * Math.cos(11.9 * y + 7.3 * Math.sin(5.0 * x));
+                value += 25 * Math.sin(19.8 * x * y) + 25 * Math.cos(17.2 * x * y);
+                
+                // 中频变化波 - 添加流动感
+                value += 45 * Math.sin(8.2 * x + 4 * Math.cos(5.0 * y)) * Math.cos(7.0 * y);
+                value += 55 * Math.cos(4.3 * x * x + 3.1 * y * y) * Math.sin(4.0 * x - 5.0 * y);
+                
+                // 创建局部热点区域
+                // 右上角热点
+                value += 100 * Math.exp(-8 * ((x-0.75)*(x-0.75) + (y-0.8)*(y-0.8)));
+                
+                // 左下角热点
+                value += 90 * Math.exp(-10 * ((x-0.2)*(x-0.2) + (y-0.15)*(y-0.15)));
+                
+                // 中间热点
+                value += 110 * Math.exp(-7 * ((x-0.5)*(x-0.5) + (y-0.5)*(y-0.5)));
+                
+                // 左上角热点
+                value += 95 * Math.exp(-9 * ((x-0.25)*(x-0.25) + (y-0.75)*(y-0.75)));
+                
+                // 右下角热点
+                value += 85 * Math.exp(-8.5 * ((x-0.75)*(x-0.75) + (y-0.25)*(y-0.25)));
+                
+                // 创建局部冷点区域(绿色区域)
+                value -= 40 * Math.exp(-15 * ((x-0.4)*(x-0.4) + (y-0.3)*(y-0.3)));
+                value -= 50 * Math.exp(-12 * ((x-0.65)*(x-0.65) + (y-0.65)*(y-0.65)));
+                value -= 45 * Math.exp(-10 * ((x-0.15)*(x-0.15) + (y-0.55)*(y-0.55)));
+                
+                // 范围控制
+                values[i] = Math.max(0, value + 100); // 确保有足够的基础值
+            }
+            
+            return values;
+        }
+        
+        // 提高网格密度以获得更平滑的等值线
+        const nx = 200;
+        const ny = 200;
+        
+        // 生成网格数据
+        const gridData = generateGridData(nx, ny);
+        const gridValues = computeGridValues(gridData, nx, ny);
+        
+        // 制作数据集，每个位置赋予一个值
+        const data = gridData.map((d, i) => [d[0] * width, d[1] * height, gridValues[i]]);
+
+        // 直接使用contours生成器从已有的网格数据生成等值线
+        const contourGenerator = d3.contours()
+            .size([nx, ny])
+            .thresholds(30); // 增加等值线级数获得更多层次
+        
+        // 构建等值线数据
+        const valueArray = new Float64Array(nx * ny);
+        gridValues.forEach((v, i) => {
+            valueArray[i] = v;
+        });
+        
+        // 生成等值线
+        let contours = contourGenerator(valueArray);
+        
+        // 等值线坐标转换 - 从网格索引转换为像素坐标
+        contours.forEach(contour => {
+            contour.coordinates.forEach(polygon => {
+                polygon.forEach(ring => {
+                    ring.forEach(point => {
+                        point[0] = (point[0] / nx) * width;
+                        point[1] = (point[1] / ny) * height;
+                    });
+                });
+            });
+        });
+        
+        // 确保contours按值从小到大排序
         contours.sort((a, b) => a.value - b.value);
-        
-        // 高性能等值线差集计算
-        function computeContoursWithHoles(contours) {
-            // 不创建深拷贝，直接处理原始数据的转换后形式
-            const processedContours = new Array(contours.length);
-            
-            // 预先将所有等值线转换为Three.js兼容的顶点数据
-            const contoursData = contours.map(contour => {
-                const contourPolygons = [];
-                
-                // 处理每个多边形
-                contour.coordinates.forEach(polygon => {
-                    const polygonData = {
-                        outer: convertPointsToNormalized(simplifyPoints(polygon[0], 0.5)),
-                        holes: []
-                    };
-                    
-                    // 处理原始内环
-                    for (let h = 1; h < polygon.length; h++) {
-                        polygonData.holes.push(
-                            convertPointsToNormalized(simplifyPoints(polygon[h], 0.5))
-                        );
-                    }
-                    
-                    contourPolygons.push(polygonData);
-                });
-                
-                return {
-                    value: contour.value,
-                    polygons: contourPolygons
-                };
-            });
-            
-            // 从低值到高值处理差集
-            for (let i = 0; i < contoursData.length; i++) {
-                const currentData = contoursData[i];
-                const processedPolygons = [];
-                
-                // 处理当前等值线的每个多边形
-                currentData.polygons.forEach(polygon => {
-                    const processedPolygon = {
-                        outer: polygon.outer,
-                        holes: [...polygon.holes] // 复制原始的内环
-                    };
-                    
-                    // 获取所有高于当前值的等值线
-                    for (let j = i + 1; j < contoursData.length; j++) {
-                        const higherData = contoursData[j];
-                        
-                        // 处理每个高值多边形
-                        higherData.polygons.forEach(higherPolygon => {
-                            // 判断高值多边形是否在当前多边形内部
-                            // 简单判断: 检查高值多边形的第一个点是否在当前多边形内
-                            // 注意: 这是一个简化的实现，完整解决方案需要更复杂的多边形相交检测
-                            if (higherPolygon.outer.length > 0 && 
-                                isPointInPolygon(higherPolygon.outer[0], processedPolygon.outer)) {
-                                // 将高值多边形的外环作为当前多边形的内环(孔)
-                                processedPolygon.holes.push(higherPolygon.outer);
-                            }
-                        });
-                    }
-                    
-                    processedPolygons.push(processedPolygon);
-                });
-                
-                processedContours[i] = {
-                    value: currentData.value,
-                    polygons: processedPolygons
-                };
-            }
-            
-            return processedContours;
-        }
-        
-        // 辅助函数: 将D3点集转换为归一化坐标
-        function convertPointsToNormalized(points) {
-            const aspectRatio = width / height;
-            return points.map(point => ({
-                x: (point[0] / width - 0.5) * aspectRatio,
-                y: -(point[1] / height - 0.5)
-            }));
-        }
-        
-        // 辅助函数: 检查点是否在多边形内部 (射线算法)
-        function isPointInPolygon(point, polygon) {
-            let inside = false;
-            
-            for (let i = 0, j = polygon.length - 1; i < polygon.length; j = i++) {
-                const xi = polygon[i].x, yi = polygon[i].y;
-                const xj = polygon[j].x, yj = polygon[j].y;
-                
-                const intersect = ((yi > point.y) !== (yj > point.y)) &&
-                    (point.x < (xj - xi) * (point.y - yi) / (yj - yi) + xi);
-                    
-                if (intersect) inside = !inside;
-            }
-            
-            return inside;
-        }
 
-        // 颜色比例尺
-        const colorScale = d3.scaleSequential()
-            .domain(d3.extent(contours, d => d.value))
-            .interpolator(d3.interpolateYlGnBu);
+        // 创建分段颜色比例尺，模拟图片中的色彩
+        const colorScale = d3.scaleLinear()
+            .domain([0, 40, 80, 140, 180, 230, 280])
+            .range([
+                '#006837', // 深绿
+                '#1a9850', // 中绿
+                '#66bd63', // 浅绿
+                '#d9ef8b', // 黄绿
+                '#ffffbf', // 黄白
+                '#fdae61', // 淡橙
+                '#f46d43', // 橙色
+                '#d73027'  // 红色
+            ])
+            .interpolate(d3.interpolateRgb.gamma(0.7)); // 调整gamma值使色彩过渡更自然
 
         // 创建离屏 Canvas 进行纹理渲染
         const textureCanvas = document.createElement('canvas');
@@ -230,6 +214,15 @@
         const scene = new THREE.Scene();
         scene.background = new THREE.Color(0xf0f0f0);
         
+        // 初始化Stats.js性能监视器
+        const stats = new Stats();
+        stats.showPanel(0); // 0: fps, 1: ms, 2: mb, 3+: custom
+        document.body.appendChild(stats.dom);
+        stats.dom.style.position = 'absolute';
+        stats.dom.style.top = '0px';
+        stats.dom.style.left = '0px';
+        stats.dom.style.zIndex = '100';
+        
         // 设置摄像机
         const camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 1000);
         camera.position.set(0, 0, 1.5);
@@ -265,7 +258,7 @@
         const plane = new THREE.Mesh(planeGeometry, material);
         // 将底部平面向下移动一点，避免与等值线层发生深度冲突
         plane.position.z = -0.01;
-        // scene.add(plane);
+        scene.add(plane);
         
         // 保存所有等值线网格的引用，以便更新
         const contourMeshes = [];
@@ -280,9 +273,6 @@
             });
             contourMeshes.length = 0;
             
-            // 使用高性能方法计算带孔洞的等值线数据
-            const processedContours = computeContoursWithHoles(contours);
-            
             // ===== 为每个等值线创建填充区域和环状线框 =====
             
             // 获取每个等值线的高度值
@@ -292,21 +282,24 @@
             const maxValue = d3.max(contours, d => d.value);
             
             // 按照值从小到大遍历，这样可以确保高值区域在上方
-            processedContours.forEach((contour, i) => {
+            contours.forEach((contour, i) => {
                 // 获取归一化高度值
                 const normalizedValue = (contour.value - minValue) / (maxValue - minValue);
                 const extrudeHeight = normalizedValue * heightScale;
                 
-                // 处理所有处理过的多边形数据
-                contour.polygons.forEach(polygon => {
+                // 处理所有轮廓部分（contour可能包含多个分离的部分）
+                contour.coordinates.forEach(polygon => {
                     // 创建形状
                     const shape = new THREE.Shape();
                     
+                    // 处理外环（第一个点集）
+                    const outerRing = simplifyPoints(polygon[0], 0.5);
+                    
                     // 外环点集构建主形状
-                    polygon.outer.forEach((point, j) => {
+                    outerRing.forEach((point, j) => {
                         // 归一化坐标
-                        const x = point.x;
-                        const y = point.y;
+                        const x = (point[0] / width - 0.5) * aspectRatio;
+                        const y = -(point[1] / height - 0.5); // Y坐标反转
                         
                         if (j === 0) {
                             shape.moveTo(x, y);
@@ -316,20 +309,24 @@
                     });
                     
                     // 处理内环（如果有的话）- 这些是形状中的"孔"
-                    if (polygon.holes.length > 0) {
-                        polygon.holes.forEach(holePoints => {
+                    if (polygon.length > 1) {
+                        for (let h = 1; h < polygon.length; h++) {
+                            const holePoints = simplifyPoints(polygon[h], 0.5);
                             const holePath = new THREE.Path();
                             
                             holePoints.forEach((point, j) => {
+                                const x = (point[0] / width - 0.5) * aspectRatio;
+                                const y = -(point[1] / height - 0.5);
+                                
                                 if (j === 0) {
-                                    holePath.moveTo(point.x, point.y);
+                                    holePath.moveTo(x, y);
                                 } else {
-                                    holePath.lineTo(point.x, point.y);
+                                    holePath.lineTo(x, y);
                                 }
                             });
                             
                             shape.holes.push(holePath);
-                        });
+                        }
                     }
                     
                     // 根据挤压设置选择几何体
@@ -365,12 +362,8 @@
                         contourMesh.position.z = Math.max(0.005, i * layerGap);
                     } else {
                         // 非挤压模式: 使用递增的Z值，确保渲染顺序正确
-                        // 所有等值面使用相同的Z值，因为我们已经通过孔洞解决了重叠问题
-                        contourMesh.position.z = 0.001;
-                        // 在非挤压模式下使用polygonOffset避免Z-fighting
-                        contourMaterial.polygonOffset = true;
-                        contourMaterial.polygonOffsetFactor = 0.1;
-                        contourMaterial.polygonOffsetUnits = 0.1;
+                        // 增加索引的Z偏移，让高值区域在上方
+                        contourMesh.position.z = 0.001 + (i * 0.0001);
                     }
                     
                     // 设置明确的渲染顺序
@@ -384,9 +377,9 @@
                         const points = [];
                         
                         // 添加外环轮廓线
-                        polygon.outer.forEach(point => {
-                            const x = point.x;
-                            const y = point.y;
+                        outerRing.forEach(point => {
+                            const x = (point[0] / width - 0.5) * aspectRatio;
+                            const y = -(point[1] / height - 0.5); 
                             points.push(new THREE.Vector3(x, y, 0));
                         });
                         
@@ -418,14 +411,14 @@
                         contourMeshes.push(line);
                         
                         // 绘制内环轮廓线
-                        if (polygon.holes.length > 0) {
-                            for (let h = 0; h < polygon.holes.length; h++) {
-                                const holePoints = polygon.holes[h];
+                        if (polygon.length > 1) {
+                            for (let h = 1; h < polygon.length; h++) {
+                                const holePoints = simplifyPoints(polygon[h], 0.5);
                                 let holeLinePoints = [];
                                 
                                 holePoints.forEach(point => {
-                                    const x = point.x;
-                                    const y = point.y;
+                                    const x = (point[0] / width - 0.5) * aspectRatio;
+                                    const y = -(point[1] / height - 0.5);
                                     holeLinePoints.push(new THREE.Vector3(x, y, 0));
                                 });
                                 
@@ -491,8 +484,10 @@
         // 动画循环
         function animate() {
             requestAnimationFrame(animate);
+            stats.begin();
             controls.update();
             renderer.render(scene, camera);
+            stats.end();
         }
         
         animate();
