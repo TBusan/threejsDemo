@@ -324,18 +324,20 @@
                         const lineGeometry = new THREE.BufferGeometry().setFromPoints(points);
                         const lineMaterial = new THREE.LineBasicMaterial({ 
                             color: 0x000000,
-                            linewidth: 2,
+                            linewidth: 3, // 增加线宽
                             depthTest: false, // 禁用深度测试以确保线条总是可见
-                            depthWrite: false // 不写入深度缓冲
+                            depthWrite: false, // 不写入深度缓冲
+                            transparent: true,
+                            opacity: 1.0
                         });
                         
                         const line = new THREE.Line(lineGeometry, lineMaterial);
                         
                         // 线条稍微位于平面上方
-                        line.position.z = 0.001; // 线条位于稍微上方的固定位置
+                        line.position.z = 0.01; // 增加线条Z偏移，确保可见性
                         
                         // 线的渲染顺序高于所有面
-                        line.renderOrder = contours.length + i;
+                        line.renderOrder = 10000 + i; // 极高的渲染顺序值确保线条始终在最上层
                         scene.add(line);
                         contourMeshes.push(line);
                         
@@ -358,12 +360,14 @@
                                 }
                                 
                                 const holeGeometry = new THREE.BufferGeometry().setFromPoints(holeLinePoints);
-                                const holeLine = new THREE.Line(holeGeometry, lineMaterial);
+                                // 克隆材质以确保每条线都有独立控制
+                                const holeLineMaterial = lineMaterial.clone();
+                                const holeLine = new THREE.Line(holeGeometry, holeLineMaterial);
                                 
                                 // 使用与外环相同的Z轴偏移
-                                holeLine.position.z = 0.001; // 线条位于稍微上方的固定位置
+                                holeLine.position.z = 0.01; // 增加线条Z偏移，确保可见性
                                 
-                                holeLine.renderOrder = contours.length + i;
+                                holeLine.renderOrder = 10000 + i; // 极高的渲染顺序值
                                 scene.add(holeLine);
                                 contourMeshes.push(holeLine);
                             }
