@@ -322,10 +322,10 @@
 						);
 
 						// 设置Z位置 - 使用极微小的Z偏移，避免相交区域的z-fighting
-						contourMesh.position.z = 0; // 所有mesh位于完全相同的平面
+						contourMesh.position.z = 0; // 所有等值面完全在同一个平面上
 
 						// 设置渲染顺序
-						contourMesh.renderOrder = 1000 + i; // 使用更大的渲染顺序间隔
+						contourMesh.renderOrder = 1000 + i; // 仅通过renderOrder控制渲染顺序
 						scene.add(contourMesh);
 						contourMeshes.push(contourMesh);
 
@@ -354,7 +354,8 @@
 								const nextMaterial = getMaterial(colorScale(nextContour.value), false, i);
 
 								const nextMesh = new THREE.Mesh(nextGeometry, nextMaterial);
-								nextMesh.position.z = 0; // 位于完全相同的平面
+								nextMesh.position.z = 0; // 所有等值面完全在同一个平面上
+
 								nextMesh.renderOrder = 1000 + i + 1; // 增加渲染顺序
 								scene.add(nextMesh);
 								contourMeshes.push(nextMesh);
@@ -390,7 +391,7 @@
 							const line = new THREE.Line(lineGeometry, lineMaterial);
 
 							// 线条稍微位于平面上方
-							line.position.z = 0; // 将线条放在与面相同的Z位置，紧贴等值面
+							line.position.z = 0; // 线条与面在完全相同的平面上
 
 							// 线的渲染顺序高于所有面
 							line.renderOrder = 10000 + i * 10; // 极高的渲染顺序值确保线条始终在最上层
@@ -448,7 +449,7 @@
 							const contourMesh = new THREE.Mesh(contourGeometry, contourMaterial);
 							
 							// 给每个等值线一个很小的z偏移，确保正确的层叠顺序
-							contourMesh.position.z = i * 0.001;
+							contourMesh.position.z = 0; // 所有等值面在同一平面上
 							contourMesh.renderOrder = 1000 + i;
 							scene.add(contourMesh);
 							contourMeshes.push(contourMesh);
@@ -472,7 +473,7 @@
 									const lineGeometry = new THREE.BufferGeometry().setFromPoints(linePoints);
 									const lineMaterial = getMaterial(0x000000, true);
 									const line = new THREE.Line(lineGeometry, lineMaterial);
-									line.position.z = i * 0.001 + 0.0005; // 线条略高于面
+									line.position.z = 0; // 线条与面在完全相同的平面上
 									line.renderOrder = 10000 + i * 10;
 									scene.add(line);
 									contourMeshes.push(line);
