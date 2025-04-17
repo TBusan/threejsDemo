@@ -65,7 +65,8 @@
 
 			// 创建更复杂的地形数据网格
 			const gridSize = 50; // 网格大小 (100x100)
-			const gridData = new Array(gridSize * gridSize);
+			const gridData = new Array(gridSize * gridSize); // 只存储高度值
+			const gridDataWithCoords = []; // 存储包含坐标的完整数据点
 			
 			// 生成复杂地形数据
 			function generateComplexTerrain() {
@@ -85,6 +86,9 @@
 					const dist = Math.sqrt(dx*dx + dy*dy);
 					return intensity * Math.exp(-(dist*dist) / (radius*radius));
 				}
+				
+				// 清空坐标数据数组
+				gridDataWithCoords.length = 0;
 				
 				// 基本地形生成
 				for (let y = 0; y < gridSize; y++) {
@@ -120,9 +124,23 @@
 						}
 						
 						// 确保值在合理范围内
-						gridData[y * gridSize + x] = Math.max(0, Math.min(100, value));
+						const clampedValue = Math.max(0, Math.min(100, value));
+						gridData[y * gridSize + x] = clampedValue;
+						
+						// 生成1-100范围内的x,y坐标
+						const coordX = 1 + (x / (gridSize-1)) * 99; // 映射到1-100范围
+						const coordY = 1 + (y / (gridSize-1)) * 99; // 映射到1-100范围
+						
+						// 将数据点添加到带坐标的数组中
+						gridDataWithCoords.push({
+							x: coordX,
+							y: coordY,
+							value: clampedValue
+						});
 					}
 				}
+				
+				// console.log('gridDataWithCoords', gridDataWithCoords.slice(0, 5)); // 输出前5个数据点示例
 				return gridData;
 			}
 			
@@ -134,7 +152,8 @@
 				.size([gridSize, gridSize])
 				.thresholds(20); // 使用20个等值线层级
 			
-			console.log('gridData',gridData)
+			console.log('gridData---',gridData)
+			console.log('gridDataWithCoords---',gridDataWithCoords)
 			// 计算等值线
 			let contours = contourGenerator(gridData);
 
@@ -206,8 +225,6 @@
 			// 保存所有等值线网格的引用，以便更新
 			const contourMeshes = [];
 
-			// 渲染模式变量
-			let useHighPerformanceMode = false;
 			const materialCache = new Map(); // 缓存材质以减少创建开销
 			
 			// 获取或创建材质（避免重复创建相同材质）
@@ -246,33 +263,6 @@
 				return material;
 			}
 
-			// 添加性能控制UI
-			function createPerformanceUI() {
-				const perfDiv = document.createElement('div');
-				perfDiv.style.position = 'absolute';
-				perfDiv.style.bottom = '10px';
-				perfDiv.style.right = '10px';
-				perfDiv.style.backgroundColor = 'rgba(0,0,0,0.5)';
-				perfDiv.style.color = 'white';
-				perfDiv.style.padding = '10px';
-				perfDiv.style.borderRadius = '5px';
-				
-				const button = document.createElement('button');
-				button.textContent = '高性能模式: 关闭';
-				button.style.padding = '5px';
-				button.addEventListener('click', () => {
-					useHighPerformanceMode = !useHighPerformanceMode;
-					button.textContent = `高性能模式: ${useHighPerformanceMode ? '开启' : '关闭'}`;
-					createContours(); // 重新创建等值线
-				});
-				
-				perfDiv.appendChild(button);
-				document.body.appendChild(perfDiv);
-			}
-			
-			// 调用创建性能UI
-			createPerformanceUI();
-
 			// 创建等值线函数
 			function createContours() {
 				// 清除现有的等值线网格
@@ -301,23 +291,8 @@
 					const contour = contoursToRender[i];
 					const nextContour = i < contoursToRender.length - 1 ? contoursToRender[i + 1] : null;
 
-					// 不使用Z轴偏移，所有mesh位于完全相同的Z位置
-					// 针对多个等值线区域的处理
-					// 每个区域作为单独的片段处理，避免复杂相交结构
-					
-					// 每个等值线的所有形状分别处理，不尝试合并（避免串面）
-					const shapes = [];
-
-					for (
-						let polygonIndex = 0;
-						polygonIndex < contour.coordinates.length;
-						polygonIndex++
-					) {
-						// 在高性能模式下，跳过小于特定大小的多边形
-						if (useHighPerformanceMode && contour.coordinates[polygonIndex][0].length < 8) {
-							continue;
-						}
-						
+					// 处理每个等值线的所有多边形
+					for (let polygonIndex = 0; polygonIndex < contour.coordinates.length; polygonIndex++) {
 						const polygon = contour.coordinates[polygonIndex];
 
 						// 创建形状
@@ -325,16 +300,18 @@
 
 						// 处理外环（第一个点集）
 						const outerRing = polygon[0];
-						
-						// 在高性能模式下，减少点的数量
-						const pointsToUse = useHighPerformanceMode 
-							? outerRing.filter((_, idx) => idx % 3 === 0 || idx === outerRing.length - 1)
-							: outerRing;
+					
+						const pointsToUse = outerRing;
 
 						// 外环点集构建主形状
 						pointsToUse.forEach((point, j) => {
-							const x = (point[0] / width - 0.5) * aspectRatio;
-							const y = -(point[1] / height - 0.5);
+							// 从网格索引转换为实际坐标 (1-100范围)
+							const gridX = 1 + (point[0] / (gridSize-1)) * 99;
+							const gridY = 1 + (point[1] / (gridSize-1)) * 99;
+						
+							// 归一化到3D场景坐标
+							const x = (gridX / 100 - 0.5) * aspectRatio;
+							const y = -(gridY / 100 - 0.5);
 
 							if (j === 0) {
 								shape.moveTo(x, y);
@@ -344,15 +321,19 @@
 						});
 
 						// 处理内环（如果有的话）
-						// 在高性能模式下跳过内环处理
-						if (polygon.length > 1 && !useHighPerformanceMode) {
+						if (polygon.length > 1) {
 							for (let h = 1; h < polygon.length; h++) {
 								const holePoints = polygon[h];
 								const holePath = new THREE.Path();
 
 								holePoints.forEach((point, j) => {
-									const x = (point[0] / width - 0.5) * aspectRatio;
-									const y = -(point[1] / height - 0.5);
+									// 从网格索引转换为实际坐标 (1-100范围)
+									const gridX = 1 + (point[0] / (gridSize-1)) * 99;
+									const gridY = 1 + (point[1] / (gridSize-1)) * 99;
+								
+									// 归一化到3D场景坐标
+									const x = (gridX / 100 - 0.5) * aspectRatio;
+									const y = -(gridY / 100 - 0.5);
 
 									if (j === 0) {
 										holePath.moveTo(x, y);
@@ -364,15 +345,7 @@
 								shape.holes.push(holePath);
 							}
 						}
-						
-						// 收集每个形状以后续处理
-						shapes.push(shape);
-
-						// 在高性能模式下，不为每个形状创建Mesh，而是在循环结束后一次性处理
-						if (useHighPerformanceMode) {
-							continue;
-						}
-
+					
 						// 使用平面几何体
 						const contourGeometry = new THREE.ShapeGeometry(shape);
 
@@ -393,50 +366,20 @@
 						scene.add(contourMesh);
 						contourMeshes.push(contourMesh);
 
-						// 如果存在下一级等值线，创建一个剪切区域
-						// 在高性能模式下，跳过下一级等值线的剪切区域创建
-						if (nextContour && !useHighPerformanceMode) {
-							for (const nextPolygon of nextContour.coordinates) {
-								// 为下一级等值线创建一个反向填充区域
-								// 这会覆盖上一级区域，形成边界清晰的环
-								const nextShape = new THREE.Shape();
-								const nextRing = nextPolygon[0];
-
-								nextRing.forEach((point, j) => {
-									const x = (point[0] / width - 0.5) * aspectRatio;
-									const y = -(point[1] / height - 0.5);
-
-									if (j === 0) {
-										nextShape.moveTo(x, y);
-									} else {
-										nextShape.lineTo(x, y);
-									}
-								});
-
-								const nextGeometry = new THREE.ShapeGeometry(nextShape);
-								// 使用缓存材质系统
-								const nextMaterial = getMaterial(getTerrainColor(nextContour.value), false, i);
-
-								const nextMesh = new THREE.Mesh(nextGeometry, nextMaterial);
-								nextMesh.position.z = 0; // 所有等值面完全在同一个平面上
-
-								nextMesh.renderOrder = 1000 + i + 1; // 增加渲染顺序
-								scene.add(nextMesh);
-								contourMeshes.push(nextMesh);
-							}
-						}
-
 						// 绘制轮廓线
-						// 在高性能模式下，减少轮廓线的绘制
 						if (showContourLines) {
 							// 创建线条几何体
 							const points = [];
 
 							// 添加外环轮廓线
-							// 在高性能模式下使用更少的点
 							pointsToUse.forEach((point) => {
-								const x = (point[0] / width - 0.5) * aspectRatio;
-								const y = -(point[1] / height - 0.5);
+								// 从网格索引转换为实际坐标 (1-100范围)
+								const gridX = 1 + (point[0] / (gridSize-1)) * 99;
+								const gridY = 1 + (point[1] / (gridSize-1)) * 99;
+							
+								// 归一化到3D场景坐标
+								const x = (gridX / 100 - 0.5) * aspectRatio;
+								const y = -(gridY / 100 - 0.5);
 								points.push(new THREE.Vector3(x, y, 0));
 							});
 
@@ -455,7 +398,7 @@
 							const line = new THREE.Line(lineGeometry, lineMaterial);
 
 							// 线条稍微位于平面上方
-							line.position.z = 0; // 线条与面在完全相同的平面上
+							line.position.z = 0.0005; // 让线条略高于面，避免z-fighting
 
 							// 线的渲染顺序高于所有面
 							line.renderOrder = 10000 + i * 10; // 极高的渲染顺序值确保线条始终在最上层
@@ -463,15 +406,19 @@
 							contourMeshes.push(line);
 
 							// 绘制内环轮廓线
-							// 在高性能模式下跳过内环轮廓线
-							if (polygon.length > 1 && !useHighPerformanceMode) {
+							if (polygon.length > 1) {
 								for (let h = 1; h < polygon.length; h++) {
 									const holePoints = polygon[h];
 									let holeLinePoints = [];
 
 									holePoints.forEach((point) => {
-										const x = (point[0] / width - 0.5) * aspectRatio;
-										const y = -(point[1] / height - 0.5);
+										// 从网格索引转换为实际坐标 (1-100范围)
+										const gridX = 1 + (point[0] / (gridSize-1)) * 99;
+										const gridY = 1 + (point[1] / (gridSize-1)) * 99;
+									
+										// 归一化到3D场景坐标
+										const x = (gridX / 100 - 0.5) * aspectRatio;
+										const y = -(gridY / 100 - 0.5);
 										holeLinePoints.push(new THREE.Vector3(x, y, 0));
 									});
 
@@ -495,7 +442,7 @@
 									);
 
 									// 使用与外环相同的Z轴偏移
-									holeLine.position.z = 0; // 将内环线条放在与面相同的Z位置，紧贴等值面
+									holeLine.position.z = 0.0005; // 让内环线条也略高于面，避免z-fighting
 
 									holeLine.renderOrder = 10000 + i * 10; // 极高的渲染顺序值
 									scene.add(holeLine);
@@ -504,46 +451,42 @@
 							}
 						}
 					}
-					
-					// 如果使用高性能模式，分别为每个形状创建Mesh
-					if (useHighPerformanceMode && shapes.length > 0) {
-						shapes.forEach((shape, shapeIndex) => {
-							const contourGeometry = new THREE.ShapeGeometry(shape);
-							const contourMaterial = getMaterial(getTerrainColor(contour.value), false, i);
-							const contourMesh = new THREE.Mesh(contourGeometry, contourMaterial);
-							
-							// 给每个等值线一个很小的z偏移，确保正确的层叠顺序
-							contourMesh.position.z = 0; // 所有等值面在同一平面上
-							contourMesh.renderOrder = 1000 + i;
-							scene.add(contourMesh);
-							contourMeshes.push(contourMesh);
-							
-							// 为每个形状添加轮廓线，确保高性能模式下也有线条
-							if (showContourLines) {
-								const linePoints = [];
-								// 从形状中提取点（这里简化处理，只获取外环）
-								for (let j = 0; j < shape.curves.length; j++) {
-									const curve = shape.curves[j];
-									if (curve.v1) linePoints.push(new THREE.Vector3(curve.v1.x, curve.v1.y, 0));
-								}
+
+					// 如果存在下一级等值线，创建一个剪切区域
+					if (nextContour) {
+						for (const nextPolygon of nextContour.coordinates) {
+							// 为下一级等值线创建一个反向填充区域
+							// 这会覆盖上一级区域，形成边界清晰的环
+							const nextShape = new THREE.Shape();
+							const nextRing = nextPolygon[0];
+
+							nextRing.forEach((point, j) => {
+								// 从网格索引转换为实际坐标 (1-100范围)
+								const gridX = 1 + (point[0] / (gridSize-1)) * 99;
+								const gridY = 1 + (point[1] / (gridSize-1)) * 99;
 								
-								// 闭合轮廓
-								if (linePoints.length > 0 && shape.curves.length > 0) {
-									const lastCurve = shape.curves[shape.curves.length - 1];
-									if (lastCurve.v2) linePoints.push(new THREE.Vector3(lastCurve.v2.x, lastCurve.v2.y, 0));
+								// 归一化到3D场景坐标
+								const x = (gridX / 100 - 0.5) * aspectRatio;
+								const y = -(gridY / 100 - 0.5);
+
+								if (j === 0) {
+									nextShape.moveTo(x, y);
+								} else {
+									nextShape.lineTo(x, y);
 								}
-								
-								if (linePoints.length > 2) {
-									const lineGeometry = new THREE.BufferGeometry().setFromPoints(linePoints);
-									const lineMaterial = getMaterial(0x000000, true);
-									const line = new THREE.Line(lineGeometry, lineMaterial);
-									line.position.z = 0; // 线条与面在完全相同的平面上
-									line.renderOrder = 10000 + i * 10;
-									scene.add(line);
-									contourMeshes.push(line);
-								}
-							}
-						});
+							});
+
+							const nextGeometry = new THREE.ShapeGeometry(nextShape);
+							// 使用缓存材质系统
+							const nextMaterial = getMaterial(getTerrainColor(nextContour.value), false, i);
+
+							const nextMesh = new THREE.Mesh(nextGeometry, nextMaterial);
+							nextMesh.position.z = 0; // 所有等值面完全在同一个平面上
+
+							nextMesh.renderOrder = 1000 + i + 1; // 增加渲染顺序
+							scene.add(nextMesh);
+							contourMeshes.push(nextMesh);
+						}
 					}
 				}
 			}
