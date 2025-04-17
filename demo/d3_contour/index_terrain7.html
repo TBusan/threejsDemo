@@ -239,14 +239,8 @@
 					[77, "rgba(255,6,0,255)"],
 				];
 
-				const localOriginColor = [
-					[50, "rgba(126,84,255,255)"],
-					[51, "rgba(99,66,255,255)"],
-					[52, "rgba(72,48,255,255)"],
-					[53, "rgba(45,30,255,255)"],
-					[54, "rgba(18,12,255,255)"],
-					[55, "rgba(0,15,240,255)"],
-				];
+				// 使用完整的颜色数组
+				const localOriginColor = localOriginColor1;
 
 				const localOriginColorLen = localOriginColor.length;
 				const localOriginColorMin = localOriginColor[0][0];
@@ -256,21 +250,16 @@
 					return localOriginColor[0][1];
 					
 				}else if(value >= localOriginColorMax) {
-
 					return localOriginColor[localOriginColorLen - 1][1];
-
 				}else {
-
-					for(let i = 0; i < localOriginColorLen; i++) {
-
+					for(let i = 0; i < localOriginColorLen - 1; i++) {
 						if(value >= localOriginColor[i][0] && value < localOriginColor[i + 1][0]) {
-							// const color1 = localOriginColor[i][1];
-							// const color2 = localOriginColor[i + 1][1];
-							// const color1Arr = color1.substring(4, color1.length - 1).split
-							return localOriginColor[i][0]
+							// 返回颜色值而不是数字
+							return localOriginColor[i][1];
 						}
 					}
-
+					// 如果没有找到匹配的区间，返回最接近的颜色
+					return localOriginColor[0][1];
 				}
 			}
 
@@ -694,7 +683,7 @@
 								points
 							);
 							// 使用缓存材质系统
-							const lineMaterial = getMaterial(0x000000, true);
+							const lineMaterial = getMaterial(getTerrainColor(contour.value), true);
 
 							const line = new THREE.Line(lineGeometry, lineMaterial);
 
@@ -738,7 +727,7 @@
 									);
 									// 克隆材质以确保每条线都有独立控制
 									// 使用缓存材质系统代替克隆
-									const holeLineMaterial = getMaterial(0x000000, true);
+									const holeLineMaterial = getMaterial(getTerrainColor(contour.value), true);
 									const holeLine = new THREE.Line(
 										holeGeometry,
 										holeLineMaterial
