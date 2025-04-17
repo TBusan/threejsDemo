@@ -171,78 +171,43 @@
 			contours.sort((a, b) => a.value - b.value);
 
 			// 自定义颜色比例尺 - 创建更丰富的地形色彩
-			function getTerrainColor1(value) {
-				const minValue = d3.min(contours, (d) => d.value);
-				const maxValue = d3.max(contours, (d) => d.value);
-				const normalizedValue = (value - minValue) / (maxValue - minValue);
+			// function getTerrainColor1(value) {
+			// 	const minValue = d3.min(contours, (d) => d.value);
+			// 	const maxValue = d3.max(contours, (d) => d.value);
+			// 	const normalizedValue = (value - minValue) / (maxValue - minValue);
 
-				// 使用多段颜色插值，创建更真实的地形图效果
-				if (normalizedValue < 0.2) {
-					// 蓝色到浅绿色 (水域和低地)
-					return d3.interpolateRgb("#1a5d8e", "#61c9a8")(normalizedValue * 5);
-				} else if (normalizedValue < 0.4) {
-					// 浅绿色到深绿色 (平原和森林)
-					return d3.interpolateRgb(
-						"#61c9a8",
-						"#128c46"
-					)((normalizedValue - 0.2) * 5);
-				} else if (normalizedValue < 0.6) {
-					// 深绿色到棕黄色 (丘陵)
-					return d3.interpolateRgb(
-						"#128c46",
-						"#d8b847"
-					)((normalizedValue - 0.4) * 5);
-				} else if (normalizedValue < 0.8) {
-					// 棕黄色到褐色 (山地)
-					return d3.interpolateRgb(
-						"#d8b847",
-						"#8f4b32"
-					)((normalizedValue - 0.6) * 5);
-				} else {
-					// 褐色到白色 (高山和雪峰)
-					return d3.interpolateRgb(
-						"#8f4b32",
-						"#ffffff"
-					)((normalizedValue - 0.8) * 5);
-				}
-			}
+			// 	// 使用多段颜色插值，创建更真实的地形图效果
+			// 	if (normalizedValue < 0.2) {
+			// 		// 蓝色到浅绿色 (水域和低地)
+			// 		return d3.interpolateRgb("#1a5d8e", "#61c9a8")(normalizedValue * 5);
+			// 	} else if (normalizedValue < 0.4) {
+			// 		// 浅绿色到深绿色 (平原和森林)
+			// 		return d3.interpolateRgb(
+			// 			"#61c9a8",
+			// 			"#128c46"
+			// 		)((normalizedValue - 0.2) * 5);
+			// 	} else if (normalizedValue < 0.6) {
+			// 		// 深绿色到棕黄色 (丘陵)
+			// 		return d3.interpolateRgb(
+			// 			"#128c46",
+			// 			"#d8b847"
+			// 		)((normalizedValue - 0.4) * 5);
+			// 	} else if (normalizedValue < 0.8) {
+			// 		// 棕黄色到褐色 (山地)
+			// 		return d3.interpolateRgb(
+			// 			"#d8b847",
+			// 			"#8f4b32"
+			// 		)((normalizedValue - 0.6) * 5);
+			// 	} else {
+			// 		// 褐色到白色 (高山和雪峰)
+			// 		return d3.interpolateRgb(
+			// 			"#8f4b32",
+			// 			"#ffffff"
+			// 		)((normalizedValue - 0.8) * 5);
+			// 	}
+			// }
 
 			function getTerrainColor(value) {
-
-				// const minValue = d3.min(contours, (d) => d.value);
-				// const maxValue = d3.max(contours, (d) => d.value);
-				// const normalizedValue = (value - minValue) / (maxValue - minValue);
-
-				// // 使用多段颜色插值，创建更真实的地形图效果
-				// if (normalizedValue < 0.2) {
-				// 	// 蓝色到浅绿色 (水域和低地)
-				// 	return d3.interpolateRgb("#1a5d8e", "#61c9a8")(normalizedValue * 5);
-				// } else if (normalizedValue < 0.4) {
-				// 	// 浅绿色到深绿色 (平原和森林)
-				// 	return d3.interpolateRgb(
-				// 		"#61c9a8",
-				// 		"#128c46"
-				// 	)((normalizedValue - 0.2) * 5);
-				// } else if (normalizedValue < 0.6) {
-				// 	// 深绿色到棕黄色 (丘陵)
-				// 	return d3.interpolateRgb(
-				// 		"#128c46",
-				// 		"#d8b847"
-				// 	)((normalizedValue - 0.4) * 5);
-				// } else if (normalizedValue < 0.8) {
-				// 	// 棕黄色到褐色 (山地)
-				// 	return d3.interpolateRgb(
-				// 		"#d8b847",
-				// 		"#8f4b32"
-				// 	)((normalizedValue - 0.6) * 5);
-				// } else {
-				// 	// 褐色到白色 (高山和雪峰)
-				// 	return d3.interpolateRgb(
-				// 		"#8f4b32",
-				// 		"#ffffff"
-				// 	)((normalizedValue - 0.8) * 5);
-				// }
-
 				const localOriginColor1 = [
 					[50, "rgba(126,84,255,255)"],
 					[51, "rgba(99,66,255,255)"],
