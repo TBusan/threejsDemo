@@ -41,6 +41,12 @@
 					显示等值线轮廓</label
 				>
 			</div>
+			<div>
+				<label
+					><input type="checkbox" id="showContourLabels" />
+					显示等值线标注</label
+				>
+			</div>
 		</div>
 		<div id="container"></div>
 		<script type="importmap">
@@ -56,12 +62,15 @@
 			import * as THREE from "three";
 			import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 			import Stats from "three/addons/libs/stats.module.js";
+
+			import { contourData } from './contourData.js'
 			// 配置参数
 			const width = 1920;
 			const height = 1080;
 			// const resolution = 256; // 纹理分辨率
 			// 控制参数
 			let showContourLines = true; // 显示等值线轮廓
+			let showContourLabels = false; // 显示等值线标注
 
 			// 创建更复杂的地形数据网格
 			const gridSize = 40; // 网格大小 (100x100)
@@ -305,6 +314,7 @@
 
 			// 保存所有等值线网格的引用，以便更新
 			const contourMeshes = [];
+			const contourLabels = []; // 保存等值线标注的引用
 
 			const materialCache = new Map(); // 缓存材质以减少创建开销
 
@@ -345,6 +355,35 @@
 				return material;
 			}
 
+			// 添加一个完整的矩形边框，确保四个角都有
+			function addRectangleBorder() {
+				// 获取默认颜色
+				const borderColor = getTerrainColor(contours[0]?.value || 0);
+				const rectPoints = [];
+				
+				// 定义矩形的四个顶点（逆时针方向）
+				// 左上角
+				rectPoints.push(new THREE.Vector3(-aspectRatio/2, 0.5, 0));
+				// 左下角
+				rectPoints.push(new THREE.Vector3(-aspectRatio/2, -0.5, 0));
+				// 右下角
+				rectPoints.push(new THREE.Vector3(aspectRatio/2, -0.5, 0));
+				// 右上角
+				rectPoints.push(new THREE.Vector3(aspectRatio/2, 0.5, 0));
+				// 闭合路径
+				rectPoints.push(new THREE.Vector3(-aspectRatio/2, 0.5, 0));
+				
+				const rectGeometry = new THREE.BufferGeometry().setFromPoints(rectPoints);
+				const rectMaterial = getMaterial(borderColor, true);
+				
+				const rectLine = new THREE.Line(rectGeometry, rectMaterial);
+				rectLine.position.z = 0.0004;
+				rectLine.renderOrder = 1001; // 确保在最上层
+				
+				scene.add(rectLine);
+				contourMeshes.push(rectLine);
+			}
+
 			// 创建等值线函数
 			function createContours() {
 				// 清除现有的等值线网格
@@ -354,6 +393,14 @@
 					if (mesh.material) mesh.material.dispose();
 				});
 				contourMeshes.length = 0;
+
+				// 清除现有的标注
+				contourLabels.forEach((label) => {
+					scene.remove(label);
+					if (label.geometry) label.geometry.dispose();
+					if (label.material) label.material.dispose();
+				});
+				contourLabels.length = 0;
 
 				// 清空材质缓存重新开始
 				materialCache.clear();
@@ -702,6 +749,47 @@
 							scene.add(line);
 							contourMeshes.push(line);
 
+							// 添加标注
+							if (showContourLabels) {
+								// 在轮廓线上均匀选择几个点放置标注
+								const numLabels = Math.max(1, Math.floor(points.length / 25)); // 控制标注密度
+								
+								for (let labelIndex = 0; labelIndex < numLabels; labelIndex++) {
+									const pointIndex = Math.floor((labelIndex + 0.5) * (points.length - 1) / numLabels);
+									if (pointIndex >= points.length) continue;
+									
+									const point = points[pointIndex];
+									
+									// 由于字体加载复杂，我们用平面和Canvas纹理替代
+									const labelText = contour.value.toFixed(0); // 显示轮廓值
+									const canvas = document.createElement('canvas');
+									canvas.width = 64;
+									canvas.height = 32;
+									const context = canvas.getContext('2d');
+									context.fillStyle = 'white';
+									context.font = 'Bold 24px Arial';
+									context.textAlign = 'center';
+									context.textBaseline = 'middle';
+									context.fillText(labelText, 32, 16);
+									
+									const texture = new THREE.CanvasTexture(canvas);
+									const labelMaterial = new THREE.SpriteMaterial({
+										map: texture,
+										transparent: true,
+										depthTest: false,
+										depthWrite: false
+									});
+									
+									const label = new THREE.Sprite(labelMaterial);
+									label.position.set(point.x, point.y, 0.001);
+									label.scale.set(0.05, 0.025, 1);
+									label.renderOrder = 2000; // 确保标注显示在最上层
+									
+									scene.add(label);
+									contourLabels.push(label);
+								}
+							}
+
 							// 绘制内环轮廓线
 							if (polygon.length > 1) {
 								for (let h = 1; h < polygon.length; h++) {
@@ -752,6 +840,9 @@
 						}
 					}
 				}
+
+				// 添加矩形边框
+				// addRectangleBorder();
 			}
 
 			// 初始创建等值线
@@ -775,6 +866,13 @@
 				.addEventListener("change", (event) => {
 					showContourLines = event.target.checked;
 					createContours(); // 重新创建等值线
+				});
+
+			document
+				.getElementById("showContourLabels")
+				.addEventListener("change", (event) => {
+					showContourLabels = event.target.checked;
+					createContours(); // 重新创建等值线和标注
 				});
 
 			// 窗口大小调整处理
