@@ -110,6 +110,23 @@
             return gridData;
         }
         
+        // 获取实际的数据范围
+        const xMin = d3.min(dataX);
+        const xMax = d3.max(dataX);
+        const yMin = d3.min(dataY);
+        const yMax = d3.max(dataY);
+        
+        console.log(`X范围: ${xMin} 到 ${xMax}, Y范围: ${yMin} 到 ${yMax}`);
+        
+        // 创建比例尺 - 使用准确的数据范围
+        const xScale = d3.scaleLinear()
+            .domain([xMin, xMax])
+            .range([-aspectRatio/2, aspectRatio/2]);
+            
+        const yScale = d3.scaleLinear()
+            .domain([yMin, yMax])
+            .range([0.5, -0.5]); // Y轴翻转，因为Three.js和屏幕坐标Y轴方向相反
+        
         // 生成地形数据
         const processedGridData = processContourData();
         
@@ -309,11 +326,13 @@
                     for (let j = 0; j < polygon[0].length; j++) {
                         const [x, y] = polygon[0][j];
                         
-                        // 转换数据坐标到场景坐标
-                        const normalizedX = (x / (gridSizeX - 1)) - 0.5;
-                        const normalizedY = (y / (gridSizeY - 1)) - 0.5;
-                        const sceneX = normalizedX * aspectRatio;
-                        const sceneY = -normalizedY; // Y轴翻转
+                        // 转换D3网格坐标到数据坐标
+                        const dataXPos = xMin + (x / (gridSizeX - 1)) * (xMax - xMin);
+                        const dataYPos = yMin + (y / (gridSizeY - 1)) * (yMax - yMin);
+                        
+                        // 使用比例尺将数据坐标转换到场景坐标
+                        const sceneX = xScale(dataXPos);
+                        const sceneY = yScale(dataYPos);
                         
                         if (j === 0) {
                             shape.moveTo(sceneX, sceneY);
@@ -332,11 +351,13 @@
                         for (let k = 0; k < polygon[j].length; k++) {
                             const [x, y] = polygon[j][k];
                             
-                            // 转换数据坐标到场景坐标
-                            const normalizedX = (x / (gridSizeX - 1)) - 0.5;
-                            const normalizedY = (y / (gridSizeY - 1)) - 0.5;
-                            const sceneX = normalizedX * aspectRatio;
-                            const sceneY = -normalizedY; // Y轴翻转
+                            // 转换D3网格坐标到数据坐标
+                            const dataXPos = xMin + (x / (gridSizeX - 1)) * (xMax - xMin);
+                            const dataYPos = yMin + (y / (gridSizeY - 1)) * (yMax - yMin);
+                            
+                            // 使用比例尺将数据坐标转换到场景坐标
+                            const sceneX = xScale(dataXPos);
+                            const sceneY = yScale(dataYPos);
                             
                             if (k === 0) {
                                 hole.moveTo(sceneX, sceneY);
@@ -486,19 +507,26 @@
             const outerShape = new THREE.Shape();
             const padding = 0.02; // 边界内边距
             
+            // 转换数据坐标到场景坐标，并加上内边距
+            const scenePadding = Math.max(aspectRatio, 1) * padding;
+            const minX = xScale(xMin) - scenePadding;
+            const maxX = xScale(xMax) + scenePadding;
+            const minY = yScale(yMin) - scenePadding;
+            const maxY = yScale(yMax) + scenePadding;
+            
             // 稍微扩大一点的矩形边界
-            outerShape.moveTo(-aspectRatio/2 - padding, -0.5 - padding);
-            outerShape.lineTo(aspectRatio/2 + padding, -0.5 - padding);
-            outerShape.lineTo(aspectRatio/2 + padding, 0.5 + padding);
-            outerShape.lineTo(-aspectRatio/2 - padding, 0.5 + padding);
+            outerShape.moveTo(minX, minY);
+            outerShape.lineTo(maxX, minY);
+            outerShape.lineTo(maxX, maxY);
+            outerShape.lineTo(minX, maxY);
             outerShape.closePath();
             
             // 创建内部孔洞 - 与数据区域大小相同
             const innerHole = new THREE.Path();
-            innerHole.moveTo(-aspectRatio/2, -0.5);
-            innerHole.lineTo(aspectRatio/2, -0.5);
-            innerHole.lineTo(aspectRatio/2, 0.5);
-            innerHole.lineTo(-aspectRatio/2, 0.5);
+            innerHole.moveTo(xScale(xMin), yScale(yMin));
+            innerHole.lineTo(xScale(xMax), yScale(yMin));
+            innerHole.lineTo(xScale(xMax), yScale(yMax));
+            innerHole.lineTo(xScale(xMin), yScale(yMax));
             innerHole.closePath();
             
             // 添加孔洞到外围形状
@@ -590,6 +618,17 @@
             midLabel.style.color = 'white';
             midLabel.textContent = ((zMax + zMin) / 2).toFixed(1);
             legendContainer.appendChild(midLabel);
+            
+            // 添加坐标范围信息
+            const rangeLabel = document.createElement('div');
+            rangeLabel.style.position = 'absolute';
+            rangeLabel.style.left = '50%';
+            rangeLabel.style.transform = 'translateX(-50%)';
+            rangeLabel.style.top = '40px';
+            rangeLabel.style.fontSize = '11px';
+            rangeLabel.style.color = 'white';
+            rangeLabel.textContent = `X: ${xMin.toFixed(1)}~${xMax.toFixed(1)}, Y: ${yMin.toFixed(1)}~${yMax.toFixed(1)}`;
+            legendContainer.appendChild(rangeLabel);
         }
 
         // 添加光源
