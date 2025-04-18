@@ -149,7 +149,89 @@
         let contours = contourGenerator(processedGridData);
 
         console.log('contours==',contours);
-
+        
+        // 转换等值线网格索引为实际坐标
+        contours = contours.map(contour => {
+            // 创建一个新的contour对象，保留原始的value和type
+            const newContour = {
+                type: contour.type,
+                value: contour.value,
+                coordinates: []
+            };
+            
+            // 转换每个多边形的坐标
+            newContour.coordinates = contour.coordinates.map(polygon => {
+                return polygon.map(ring => {
+                    return ring.map(point => {
+                        // 获取原始网格索引
+                        const x = point[0];
+                        const y = point[1];
+                        
+                        // 索引到实际坐标的转换（双线性插值）
+                        // 获取索引的整数部分和小数部分
+                        const xFloor = Math.floor(x);
+                        const yFloor = Math.floor(y);
+                        const xFrac = x - xFloor;
+                        const yFrac = y - yFloor;
+                        
+                        // 确保索引在有效范围内
+                        const x0 = Math.min(Math.max(0, xFloor), gridSizeX - 2);
+                        const y0 = Math.min(Math.max(0, yFloor), gridSizeY - 2);
+                        const x1 = Math.min(x0 + 1, gridSizeX - 1);
+                        const y1 = Math.min(y0 + 1, gridSizeY - 1);
+                        
+                        // 获取四个相邻点的实际坐标
+                        const xCoord00 = dataX[x0];
+                        const yCoord00 = dataY[y0];
+                        const xCoord10 = dataX[x1];
+                        const yCoord10 = dataY[y0];
+                        const xCoord01 = dataX[x0];
+                        const yCoord01 = dataY[y1];
+                        const xCoord11 = dataX[x1];
+                        const yCoord11 = dataY[y1];
+                        
+                        // 计算数据范围边界（提前计算以提高性能）
+                        const xMin = Math.min(...dataX);
+                        const xMax = Math.max(...dataX);
+                        const yMin = Math.min(...dataY);
+                        const yMax = Math.max(...dataY);
+                        
+                        // 严格检查：确保所有插值使用的坐标都在范围内
+                        // 如果索引对应的实际坐标超出范围，调整到边界
+                        const safeXCoord00 = Math.max(xMin, Math.min(xCoord00, xMax));
+                        const safeYCoord00 = Math.max(yMin, Math.min(yCoord00, yMax));
+                        const safeXCoord10 = Math.max(xMin, Math.min(xCoord10, xMax));
+                        const safeYCoord10 = Math.max(yMin, Math.min(yCoord10, yMax));
+                        const safeXCoord01 = Math.max(xMin, Math.min(xCoord01, xMax));
+                        const safeYCoord01 = Math.max(yMin, Math.min(yCoord01, yMax));
+                        const safeXCoord11 = Math.max(xMin, Math.min(xCoord11, xMax));
+                        const safeYCoord11 = Math.max(yMin, Math.min(yCoord11, yMax));
+                        
+                        // 双线性插值计算实际坐标
+                        // X坐标插值
+                        const xTop = safeXCoord00 * (1 - xFrac) + safeXCoord10 * xFrac;
+                        const xBottom = safeXCoord01 * (1 - xFrac) + safeXCoord11 * xFrac;
+                        let actualX = xTop * (1 - yFrac) + xBottom * yFrac;
+                        
+                        // Y坐标插值
+                        const yLeft = safeYCoord00 * (1 - yFrac) + safeYCoord01 * yFrac;
+                        const yRight = safeYCoord10 * (1 - yFrac) + safeYCoord11 * yFrac;
+                        let actualY = yLeft * (1 - xFrac) + yRight * xFrac;
+                        
+                        // 再次确保最终结果也在范围内
+                        actualX = Math.max(xMin, Math.min(actualX, xMax));
+                        actualY = Math.max(yMin, Math.min(actualY, yMax));
+                        
+                        // 返回实际坐标
+                        return [actualX, actualY];
+                    });
+                });
+            });
+            
+            return newContour;
+        });
+        
+        console.log('transformed contours==', contours);
         
         // 颜色比例尺 - 使用紫蓝色系
         const colorScale = d3.scaleSequential()
@@ -162,28 +244,36 @@
                 "#4272f5"  // 蓝色
             ]));
             
-        // 创建地理路径生成器
-        const path = d3.geoPath();
+        // 创建从实际坐标映射到屏幕坐标的转换函数
+        const coordToScreenTransform = d3.geoTransform({
+            point: function(x, y) {
+                // 使用比例尺将实际坐标转换为屏幕坐标
+                this.stream.point(xScale(x), yScale(y));
+            }
+        });
         
-        // 添加剪切路径
-        svg.append("clipPath")
-            .attr("id", "clip")
+        // 创建地理路径生成器，使用实际坐标到屏幕坐标的转换
+        const path = d3.geoPath().projection(coordToScreenTransform);
+        
+        // 添加更精确的剪切路径，限制在数据有效范围内
+        svg.append("defs")
+            .append("clipPath")
+            .attr("id", "data-clip")
             .append("rect")
-            .attr("width", innerWidth)
-            .attr("height", innerHeight);
+            .attr("x", xScale(Math.min(...dataX)))
+            .attr("y", yScale(Math.max(...dataY)))
+            .attr("width", xScale(Math.max(...dataX)) - xScale(Math.min(...dataX)))
+            .attr("height", yScale(Math.min(...dataY)) - yScale(Math.max(...dataY)));
             
         // 绘制等值线区域
         const contourLayer = svg.append("g")
-            .attr("clip-path", "url(#clip)");
+            .attr("clip-path", "url(#data-clip)");
             
         contourLayer.selectAll("path")
             .data(contours)
             .enter()
             .append("path")
-            .attr("d", d => {
-                // 将网格坐标转换为屏幕坐标
-                return path(d);
-            })
+            .attr("d", path) // 直接使用path函数，不需要额外转换
             .attr("fill", d => colorScale(d.value))
             .attr("stroke", "#333")
             .attr("stroke-width", d => {
