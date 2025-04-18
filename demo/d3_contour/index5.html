@@ -400,31 +400,6 @@
                 }
             }
 
-            // 添加数据区域边界框 - 确保始终显示，不受showContourLines选项影响
-            const borderPoints = [
-                new THREE.Vector3(-aspectRatio/2, -0.5, 0),
-                new THREE.Vector3(aspectRatio/2, -0.5, 0),
-                new THREE.Vector3(aspectRatio/2, 0.5, 0),
-                new THREE.Vector3(-aspectRatio/2, 0.5, 0),
-                new THREE.Vector3(-aspectRatio/2, -0.5, 0)
-            ];
-            
-            const borderGeometry = new THREE.BufferGeometry().setFromPoints(borderPoints);
-            const borderMaterial = new THREE.LineBasicMaterial({
-                color: 0xffffff,
-                linewidth: 3, // 增加线宽
-                transparent: true,
-                opacity: 1.0,
-                depthTest: false,
-                depthWrite: false
-            });
-            
-            const borderLine = new THREE.Line(borderGeometry, borderMaterial);
-            borderLine.position.z = 0.01; // 确保边界显示在所有等值线上面
-            borderLine.renderOrder = 4000; // 给边界更高的渲染优先级
-            
-            scene.add(borderLine);
-            contourMeshes.push(borderLine);
             
         }
         
