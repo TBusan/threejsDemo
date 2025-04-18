@@ -90,7 +90,7 @@
 			// 控制参数
 			let enableExtrusion = true; // 默认启用挤压效果
 			let showContourLines = true; // 显示等值线轮廓
-
+			
 			// 生成网格数据
 			const size = 100; // 网格大小
 			const gridData = new Array(size * size);
@@ -253,6 +253,13 @@
 				});
 				contourMeshes.length = 0;
 				
+				// 获取等值线的值范围 - 在任何模式下都需要这些值
+				const minValue = d3.min(contours, d => d.value);
+				const maxValue = d3.max(contours, d => d.value);
+				
+				// 判断是否为2D模式
+				const is2DMode = !enableExtrusion;
+				
 				// 合并几何体的缓存，按值分组
 				const geometriesByValue = useMergedGeometry ? new Map() : null;
 				
@@ -260,18 +267,25 @@
 				const heightScale = 0.05; // 整体高度比例
 				const layerGap = 0.002; // 减小层间距
 				const lineZOffset = 0.002; // 增加线条Z轴偏移值
-				const minValue = d3.min(contours, (d) => d.value);
-				const maxValue = d3.max(contours, (d) => d.value);
+				const flatModeZGap = 10.0; // 极大增加非挤压模式下的Z轴层间距
+				const flatModeLineOffset = 0.05; // 增加非挤压模式下线条相对其平面的偏移
 				
 				// 单一线条材质，所有轮廓线共用
 				const lineMaterial = new THREE.LineBasicMaterial({
 					color: 0x000000,
-					linewidth: 2,
-					transparent: false,
+					linewidth: 3, // 增加线宽
+					transparent: true,
+					opacity: 1.0,
 					depthTest: false, // 禁用深度测试确保线条总是可见
+					depthWrite: false, // 禁用深度写入
+					polygonOffset: true,
+					polygonOffsetFactor: -10,
+					polygonOffsetUnits: -10
 				});
-
+				
 				// 按照值从小到大遍历，这样可以确保高值区域在上方
+				contours.sort((a, b) => a.value - b.value);
+				
 				contours.forEach((contour, i) => {
 					// 获取归一化高度值
 					const normalizedValue =
@@ -292,6 +306,8 @@
 						
 						// 处理外环（第一个点集）
 						const outerRing = polygon[0];
+						// 确保有效的外环
+						if (!outerRing || outerRing.length < 3) return;
 						
 						// 外环点集构建主形状
 						outerRing.forEach((point, j) => {
@@ -310,6 +326,8 @@
 						if (polygon.length > 1) {
 							for (let h = 1; h < polygon.length; h++) {
 								const holePoints = polygon[h];
+								// 确保有效的内环
+								if (!holePoints || holePoints.length < 3) continue;
 								const holePath = new THREE.Path();
 								
 								holePoints.forEach((point, j) => {
@@ -345,13 +363,19 @@
 							contourGeometry = new THREE.ShapeGeometry(shape);
 						}
 						
+						// 计算基础Z位置（非挤压模式使用大间隔）
+						const baseZPosition = is2DMode ? 
+							((contours.length - i) * flatModeZGap) : // 增加间隔，反转顺序确保高值显示在上层
+							Math.max(0.005, i * layerGap);
+						
 						// 对于合并几何体模式
 						if (useMergedGeometry) {
 							// 应用位置变换
 							const matrix = new THREE.Matrix4();
-							const zPosition = enableExtrusion ? 
-								Math.max(0.005, i * layerGap) + (extrudeHeight + lineZOffset) : 
-								lineZOffset + (normalizedValue * 0.01); // 根据值设置Z偏移，让高值更靠上
+							
+							// 挤压模式下，最终位置包含挤压高度
+							const zPosition = is2DMode ? baseZPosition : (baseZPosition + extrudeHeight);
+							
 							matrix.makeTranslation(0, 0, zPosition);
 							contourGeometry.applyMatrix4(matrix);
 							
@@ -359,17 +383,28 @@
 							geometriesByValue.get(contour.value).push(contourGeometry);
 						} 
 						else {
-							// 创建材质 - 低透明度以避免看到下层重叠
+							// 创建材质
+							// 在2D模式下，确保材质始终不透明
 							const contourMaterial = useSimpleShading ? 
 								new THREE.MeshBasicMaterial({
 									color: new THREE.Color(betterColorScale(contour.value)),
 									side: THREE.DoubleSide,
+									depthTest: true,
+									depthWrite: true,
+									transparent: false,
+									polygonOffset: true,
+									polygonOffsetFactor: 1, // 使用多边形偏移以防止Z-fighting
+									polygonOffsetUnits: 1
 								}) : 
 								new THREE.MeshPhongMaterial({
 									color: new THREE.Color(betterColorScale(contour.value)),
 									side: THREE.DoubleSide,
 									depthWrite: true,
 									depthTest: true,
+									transparent: false,
+									polygonOffset: true,
+									polygonOffsetFactor: 1,
+									polygonOffsetUnits: 1
 								});
 							
 							// 创建网格并添加到场景
@@ -378,18 +413,14 @@
 								contourMaterial
 							);
 							
-							// Z位置设置
-							if (enableExtrusion) {
-								// 挤压模式: 使用固定间隙
-								contourMesh.position.z = Math.max(0.005, i * layerGap);
-							} else {
-								// 非挤压模式: 使用递增的Z值，确保渲染顺序正确
-								// 增加索引的Z偏移，让高值区域在上方
-								contourMesh.position.z = 0.001 + i * 0.0001;
-							}
+							// 设置Z位置
+							contourMesh.position.z = baseZPosition;
 							
-							// 设置明确的渲染顺序
-							contourMesh.renderOrder = i;
+							// 设置明确的渲染顺序（值越小，越先渲染）
+							contourMesh.renderOrder = is2DMode ? 
+								(contours.length - i) * 1000 : // 极大增加渲染顺序间隔
+								i;
+							
 							scene.add(contourMesh);
 							contourMeshes.push(contourMesh);
 						}
@@ -417,14 +448,14 @@
 							const outerLine = new THREE.Line(outerLineGeometry, lineMaterial);
 							
 							// 设置Z位置，确保线在面的上方
-							const lineZ = enableExtrusion ? 
-								Math.max(0.005, i * layerGap) + extrudeHeight + lineZOffset : 
-								lineZOffset + (normalizedValue * 0.01);
+							const lineZ = is2DMode ? 
+								baseZPosition + flatModeLineOffset * 3 : // 增加线条的高度偏移
+								baseZPosition + extrudeHeight + lineZOffset;
 								
 							outerLine.position.z = lineZ;
 							
-							// 设置很高的渲染顺序确保在所有面之上
-							outerLine.renderOrder = 1000 + i;
+							// 设置很高的渲染顺序确保在所有面之上（比对应面高）
+							outerLine.renderOrder = 99999; // 设置更极高的渲染顺序
 							
 							scene.add(outerLine);
 							contourMeshes.push(outerLine);
@@ -433,6 +464,8 @@
 							if (polygon.length > 1) {
 								for (let h = 1; h < polygon.length; h++) {
 									const holePoints = polygon[h];
+									// 确保有效的内环
+									if (!holePoints || holePoints.length < 3) continue;
 									const holeLinePoints = [];
 									
 									// 为每个内环创建点
@@ -457,7 +490,7 @@
 									holeLine.position.z = lineZ;
 									
 									// 设置很高的渲染顺序确保在所有面之上
-									holeLine.renderOrder = 1000 + i;
+									holeLine.renderOrder = 99999; // 设置更极高的渲染顺序
 									
 									scene.add(holeLine);
 									contourMeshes.push(holeLine);
@@ -475,24 +508,39 @@
 							const mergedGeometry = mergeGeometries(geometries);
 							
 							// 创建材质
+							// 为合并几何体设置高级材质属性
 							const material = useSimpleShading ? 
 								new THREE.MeshBasicMaterial({
 									color: new THREE.Color(betterColorScale(value)),
-									side: THREE.DoubleSide
+									side: THREE.DoubleSide,
+									depthTest: true,
+									depthWrite: true,
+									transparent: false,
+									polygonOffset: true,
+									polygonOffsetFactor: 1,
+									polygonOffsetUnits: 1
 								}) : 
 								new THREE.MeshPhongMaterial({
 									color: new THREE.Color(betterColorScale(value)),
 									side: THREE.DoubleSide,
 									depthWrite: true,
-									depthTest: true
+									depthTest: true,
+									transparent: false,
+									polygonOffset: true,
+									polygonOffsetFactor: 1,
+									polygonOffsetUnits: 1
 								});
 							
 							// 创建合并后的网格
 							const mesh = new THREE.Mesh(mergedGeometry, material);
 							
-							// 设置渲染顺序
-							const i = Array.from(geometriesByValue.keys()).indexOf(value);
-							mesh.renderOrder = i;
+							// 设置渲染顺序 (基于值的索引)
+							const valueList = Array.from(geometriesByValue.keys()).sort((a, b) => a - b);
+							const valueIndex = valueList.indexOf(value);
+							// 在2D模式下使用更高的渲染顺序
+							mesh.renderOrder = is2DMode ? 
+								((valueList.length - valueIndex) * 1000) : // 反转顺序并极大增加间隔
+								valueIndex;
 							
 							scene.add(mesh);
 							contourMeshes.push(mesh);

@@ -136,6 +136,8 @@
         
         // 对阈值进行排序
         thresholds.sort((a, b) => a - b);
+
+        console.log('thresholds==',thresholds);
         
         // 使用d3.contours()从处理后的网格数据生成等值线
         const contourGenerator = d3
