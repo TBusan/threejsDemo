@@ -44,10 +44,6 @@
         <div>
             <label><input type="checkbox" id="showContourLines" checked />显示等值线轮廓</label>
         </div>
-        <div>
-            <label><input type="checkbox" id="showContourLabels" />显示等值线标注</label>
-        </div>
-        <div id="colorScale"></div>
     </div>
     <div id="container"></div>
 
@@ -65,7 +61,7 @@
         import * as THREE from "three";
         import { OrbitControls } from "three/addons/controls/OrbitControls.js";
         import Stats from "three/addons/libs/stats.module.js";
-        import { contourData } from "./contourData2.js";
+        import { contourData } from "./contourData.js";
 
         // ===== D3.js 部分：生成等值线数据 =====
         // 配置参数
@@ -116,16 +112,28 @@
         const yMin = d3.min(dataY);
         const yMax = d3.max(dataY);
         
-        console.log(`X范围: ${xMin} 到 ${xMax}, Y范围: ${yMin} 到 ${yMax}`);
+        // 计算数据的真实长宽比
+        const dataAspectRatio = (xMax - xMin) / Math.abs(yMax - yMin);
         
-        // 创建比例尺 - 使用准确的数据范围
+        console.log(`X范围: ${xMin} 到 ${xMax}, Y范围: ${yMin} 到 ${yMax}`);
+        console.log(`数据长宽比: ${dataAspectRatio.toFixed(2)}`);
+        
+        // 计算THREE.js场景中的坐标范围，保持数据比例
+        // 以Y轴为基准，X轴根据实际数据比例调整
+        const sceneHeight = 1.0; // THREE.js场景中y轴的总高度
+        const sceneWidth = sceneHeight * dataAspectRatio; // 按数据比例计算x轴宽度
+        
+        // 调整相机位置以适应新的场景比例
+        const cameraDistance = Math.max(dataAspectRatio, 2) * 1.2; // 确保能看到整个场景
+        
+        // 创建比例尺 - 使用准确的数据范围和比例
         const xScale = d3.scaleLinear()
             .domain([xMin, xMax])
-            .range([-aspectRatio/2, aspectRatio/2]);
+            .range([-sceneWidth/2, sceneWidth/2]);
             
         const yScale = d3.scaleLinear()
             .domain([yMin, yMax])
-            .range([0.5, -0.5]); // Y轴翻转，因为Three.js和屏幕坐标Y轴方向相反
+            .range([sceneHeight/2, -sceneHeight/2]); // Y轴翻转，因为Three.js和屏幕坐标Y轴方向相反
         
         // 生成地形数据
         const processedGridData = processContourData();
@@ -137,29 +145,6 @@
         
         // 添加特定阈值
         const specificThresholds = [-1000, 0, 100, 200, 300, 400, 500, 1000];
-        
-        // 首先添加特定阈值
-        specificThresholds.forEach(val => {
-            if (val >= zMin && val <= zMax && !thresholds.includes(val)) {
-                thresholds.push(val);
-            }
-        });
-        
-        // 然后添加均匀分布的阈值
-        for (let i = 1; i <= thresholdCount; i++) {
-            const val = zMin + (valueRange * i) / (thresholdCount + 1);
-            // 避免与特定阈值太接近
-            const isTooClose = specificThresholds.some(specific => 
-                Math.abs(val - specific) < valueRange / 40);
-            if (!isTooClose) {
-                thresholds.push(val);
-            }
-        }
-        
-        // 对阈值进行排序
-        thresholds.sort((a, b) => a - b);
-
-        console.log('thresholds==',thresholds);
         
         // 使用d3.contours()从处理后的网格数据生成等值线
         const contourGenerator = d3
@@ -182,11 +167,11 @@
             
             // 使用紫蓝色系
             const localOriginColor = [
-                [minVal, "rgba(76,29,143,255)"],       // 深紫色
+                [minVal, "rgba(76,29,143,255)"],             // 深紫色
                 [minVal + step*1, "rgba(85,53,201,255)"],    // 紫色
                 [minVal + step*2, "rgba(73,63,189,255)"],    // 蓝紫色
                 [minVal + step*3, "rgba(56,93,220,255)"],    // 紫蓝色
-                [maxVal, "rgba(66,114,245,255)"]            // 蓝色
+                [maxVal, "rgba(66,114,245,255)"]             // 蓝色
             ];
             
             const localOriginColorLen = localOriginColor.length;
@@ -224,7 +209,7 @@
             0.1,
             1000
         );
-        camera.position.set(0, 0, 1.5);
+        camera.position.set(0, 0, cameraDistance);
 
         // 创建渲染器
         const renderer = new THREE.WebGLRenderer({
@@ -412,62 +397,6 @@
                         contourMeshes.push(line);
                     }
                     
-                    // 如果需要显示等值线标注
-                    if (showContourLabels) {
-                        // 获取形状的边界框
-                        const bbox = new THREE.Box3();
-                        const points = shape.getPoints(16);
-                        const tempGeometry = new THREE.BufferGeometry().setFromPoints(points);
-                        bbox.setFromBufferAttribute(tempGeometry.attributes.position);
-                        tempGeometry.dispose();
-                        
-                        // 计算标注位置 - 在形状中心
-                        const centerX = (bbox.min.x + bbox.max.x) / 2;
-                        const centerY = (bbox.min.y + bbox.max.y) / 2;
-                        
-                        // 创建标注
-                        const canvas = document.createElement('canvas');
-                        canvas.width = 128;
-                        canvas.height = 64;
-                        const ctx = canvas.getContext('2d');
-                        
-                        // 设置文本
-                        ctx.fillStyle = isSpecificValue ? 'white' : '#AAAAAA';
-                        ctx.font = isSpecificValue ? 'bold 28px Arial' : '20px Arial';
-                        ctx.textAlign = 'center';
-                        ctx.textBaseline = 'middle';
-                        
-                        // 绘制文本
-                        const text = contour.value.toFixed(isSpecificValue ? 0 : 1);
-                        ctx.fillText(text, canvas.width / 2, canvas.height / 2);
-                        
-                        // 创建纹理
-                        const texture = new THREE.CanvasTexture(canvas);
-                        texture.needsUpdate = true;
-                        
-                        // 创建标注材质
-                        const labelMaterial = new THREE.SpriteMaterial({
-                            map: texture,
-                            transparent: true,
-                            depthTest: false,
-                            depthWrite: false
-                        });
-                        
-                        // 创建标注精灵
-                        const label = new THREE.Sprite(labelMaterial);
-                        label.position.set(centerX, centerY, zOffset + 0.01);
-                        
-                        // 设置标注大小
-                        const labelScale = isSpecificValue ? 0.1 : 0.07;
-                        label.scale.set(labelScale * aspectRatio, labelScale, 1);
-                        
-                        // 设置渲染顺序
-                        label.renderOrder = 1000 + i;
-                        
-                        // 添加到场景
-                        scene.add(label);
-                        contourLabels.push(label);
-                    }
                 }
             }
 
@@ -497,140 +426,10 @@
             scene.add(borderLine);
             contourMeshes.push(borderLine);
             
-            // 创建数据最小值的外围轮廓 - 确保整个数据区域被包含
-            createOuterBoundary();
         }
         
-        // 创建数据区域的外围轮廓
-        function createOuterBoundary() {
-            // 创建一个稍微大一点的矩形作为外围边界
-            const outerShape = new THREE.Shape();
-            const padding = 0.02; // 边界内边距
-            
-            // 转换数据坐标到场景坐标，并加上内边距
-            const scenePadding = Math.max(aspectRatio, 1) * padding;
-            const minX = xScale(xMin) - scenePadding;
-            const maxX = xScale(xMax) + scenePadding;
-            const minY = yScale(yMin) - scenePadding;
-            const maxY = yScale(yMax) + scenePadding;
-            
-            // 稍微扩大一点的矩形边界
-            outerShape.moveTo(minX, minY);
-            outerShape.lineTo(maxX, minY);
-            outerShape.lineTo(maxX, maxY);
-            outerShape.lineTo(minX, maxY);
-            outerShape.closePath();
-            
-            // 创建内部孔洞 - 与数据区域大小相同
-            const innerHole = new THREE.Path();
-            innerHole.moveTo(xScale(xMin), yScale(yMin));
-            innerHole.lineTo(xScale(xMax), yScale(yMin));
-            innerHole.lineTo(xScale(xMax), yScale(yMax));
-            innerHole.lineTo(xScale(xMin), yScale(yMax));
-            innerHole.closePath();
-            
-            // 添加孔洞到外围形状
-            outerShape.holes.push(innerHole);
-            
-            // 创建几何体
-            const geometry = new THREE.ShapeGeometry(outerShape, 32);
-            
-            // 使用最小值的颜色
-            const minColor = parseColor(getTerrainColor(zMin));
-            
-            // 创建材质
-            const material = new THREE.MeshBasicMaterial({
-                color: minColor,
-                transparent: true,
-                opacity: 0.5,
-                side: THREE.DoubleSide,
-                depthWrite: false
-            });
-            
-            // 创建网格
-            const mesh = new THREE.Mesh(geometry, material);
-            mesh.position.z = -0.001; // 确保在所有等值线下面
-            mesh.renderOrder = -1;
-            
-            // 添加到场景
-            scene.add(mesh);
-            contourMeshes.push(mesh);
-            
-            // 添加轮廓线 - 只有在显示等值线轮廓时才显示
-            if (showContourLines) {
-                const lineGeometry = new THREE.EdgesGeometry(geometry);
-                const lineMaterial = new THREE.LineBasicMaterial({
-                    color: 0xFFFFFF,
-                    linewidth: 2,
-                    transparent: true,
-                    opacity: 0.8,
-                    depthTest: false,
-                    depthWrite: false
-                });
-                
-                const line = new THREE.LineSegments(lineGeometry, lineMaterial);
-                line.position.z = 0.005; // 确保在其他等值线上面
-                line.renderOrder = 3500;
-                
-                scene.add(line);
-                contourMeshes.push(line);
-            }
-        }
-
-        // 创建颜色图例
-        function createColorLegend() {
-            const legendContainer = document.getElementById('colorScale');
-            legendContainer.innerHTML = '';
-            legendContainer.style.position = 'relative';
-            legendContainer.style.height = '20px';
-            legendContainer.style.width = '100%';
-            legendContainer.style.marginTop = '10px';
-            
-            // 更新颜色图例以匹配新的颜色方案
-            legendContainer.style.background = 'linear-gradient(to right, rgba(76,29,143,255), rgba(85,53,201,255), rgba(73,63,189,255), rgba(56,93,220,255), rgba(66,114,245,255))';
-            
-            // 添加最小值和最大值标签
-            const minLabel = document.createElement('div');
-            minLabel.style.position = 'absolute';
-            minLabel.style.left = '0';
-            minLabel.style.top = '20px';
-            minLabel.style.fontSize = '12px';
-            minLabel.style.color = 'white';
-            minLabel.textContent = zMin.toFixed(1);
-            legendContainer.appendChild(minLabel);
-            
-            const maxLabel = document.createElement('div');
-            maxLabel.style.position = 'absolute';
-            maxLabel.style.right = '0';
-            maxLabel.style.top = '20px';
-            maxLabel.style.fontSize = '12px';
-            maxLabel.style.color = 'white';
-            maxLabel.textContent = zMax.toFixed(1);
-            legendContainer.appendChild(maxLabel);
-            
-            // 添加中间值
-            const midLabel = document.createElement('div');
-            midLabel.style.position = 'absolute';
-            midLabel.style.left = '50%';
-            midLabel.style.transform = 'translateX(-50%)';
-            midLabel.style.top = '20px';
-            midLabel.style.fontSize = '12px';
-            midLabel.style.color = 'white';
-            midLabel.textContent = ((zMax + zMin) / 2).toFixed(1);
-            legendContainer.appendChild(midLabel);
-            
-            // 添加坐标范围信息
-            const rangeLabel = document.createElement('div');
-            rangeLabel.style.position = 'absolute';
-            rangeLabel.style.left = '50%';
-            rangeLabel.style.transform = 'translateX(-50%)';
-            rangeLabel.style.top = '40px';
-            rangeLabel.style.fontSize = '11px';
-            rangeLabel.style.color = 'white';
-            rangeLabel.textContent = `X: ${xMin.toFixed(1)}~${xMax.toFixed(1)}, Y: ${yMin.toFixed(1)}~${yMax.toFixed(1)}`;
-            legendContainer.appendChild(rangeLabel);
-        }
-
+ 
+    
         // 添加光源
         const ambientLight = new THREE.AmbientLight(0xffffff, 0.6);
         scene.add(ambientLight);
@@ -641,7 +440,7 @@
 
         // 初始化
         createContours();
-        createColorLegend();
+
 
         // UI事件监听
         document.getElementById("showContourLines").addEventListener("change", event => {
@@ -649,10 +448,7 @@
             createContours(); // 重新创建等值线
         });
 
-        document.getElementById("showContourLabels").addEventListener("change", event => {
-            showContourLabels = event.target.checked;
-            createContours(); // 重新创建等值线和标注
-        });
+ 
 
         // 窗口大小调整处理
         window.addEventListener("resize", () => {
