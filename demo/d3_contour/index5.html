@@ -50,6 +50,11 @@
 					/>显示等值线轮廓</label
 				>
 			</div>
+      <div>
+        <label for="smoothFactor">平滑度: </label>
+        <input type="range" id="smoothFactor" min="0" max="1" step="0.1" value="0.5">
+        <span id="smoothValue">0.5</span>
+      </div>
     </div>
 		<div id="container"></div>
 
@@ -78,6 +83,7 @@
 			// 控制参数
 			let showContourLines = true; // 显示等值线轮廓
 			let showContourLabels = false; // 显示等值线标注
+      let smoothFactor = 0.5; // 平滑因子，范围0-1
             
         // 解析contourData数据
         const dataX = contourData.data.x; // X坐标数组
@@ -157,8 +163,83 @@
 				1.85, 64.44, 127.04, 189.63, 252.23, 314.83, 377.42, 440.02, 502.61, 565.21, 627.8, 690.4, 752.99,
 				815.59, 878.18, 940.78
 			];
+        
+        // 平滑等值线路径的函数
+        function smoothPath(points, factor) {
+            if (points.length < 3) return points;
+            
+            const smoothedPoints = [];
+            
+            // 添加第一个点
+            smoothedPoints.push([...points[0]]);
+            
+            // 平滑中间点
+            for (let i = 1; i < points.length - 1; i++) {
+                const prev = points[i - 1];
+                const curr = points[i];
+                const next = points[i + 1];
+                
+                // 计算平滑点
+                const x = curr[0] + (next[0] - prev[0]) * factor * 0.25;
+                const y = curr[1] + (next[1] - prev[1]) * factor * 0.25;
+                
+                smoothedPoints.push([x, y]);
+            }
+            
+            // 添加最后一个点
+            smoothedPoints.push([...points[points.length - 1]]);
+            
+            return smoothedPoints;
+        }
+        
+        // 生成贝塞尔点的函数
+        function generateBezierPoints(points, smoothness) {
+            if (points.length < 3) return points;
+            
+            const bezierPoints = [];
+            const n = points.length;
+            
+            // 第一个点
+            bezierPoints.push({ type: 'M', x: points[0][0], y: points[0][1] });
+            
+            for (let i = 0; i < n - 2; i++) {
+                const p0 = points[i];
+                const p1 = points[i + 1];
+                const p2 = points[i + 2];
+                
+                // 计算控制点
+                const cp1x = p0[0] + (p1[0] - p0[0]) * smoothness;
+                const cp1y = p0[1] + (p1[1] - p0[1]) * smoothness;
+                
+                const cp2x = p1[0] - (p2[0] - p0[0]) * smoothness;
+                const cp2y = p1[1] - (p2[1] - p0[1]) * smoothness;
+                
+                bezierPoints.push({
+                    type: 'C',
+                    cp1x: cp1x, cp1y: cp1y,
+                    cp2x: cp2x, cp2y: cp2y,
+                    x: p1[0], y: p1[1]
+                });
+            }
+            
+            // 最后一条线段
+            const lastIdx = n - 1;
+            const secondLastIdx = n - 2;
+            
+            const cp1x = points[secondLastIdx][0] + (points[lastIdx][0] - points[secondLastIdx-1][0]) * smoothness;
+            const cp1y = points[secondLastIdx][1] + (points[lastIdx][1] - points[secondLastIdx-1][1]) * smoothness;
+            
+            bezierPoints.push({
+                type: 'Q',
+                cpx: cp1x, cpy: cp1y,
+                x: points[lastIdx][0], y: points[lastIdx][1]
+            });
+            
+            return bezierPoints;
+        }
+
         // 使用d3.contours()从处理后的网格数据生成等值线
-        const contourGenerator = d3
+        let contourGenerator = d3
             .contours()
             .size([gridSizeX, gridSizeY])
 				.thresholds(specificThresholds)
@@ -171,48 +252,7 @@
         
         // 颜色比例尺 - 使用紫蓝色系
 			function getTerrainColor(value) {
-				// 根据数据范围创建颜色映射
-				// const minVal = zMin;
-				// const maxVal = zMax;
-				// const step = (maxVal - minVal) / 22;
-
-				// // 使用紫蓝色系
-				// const localOriginColor = [
-				//     [minVal, "rgba(76,29,143,255)"],             // 深紫色
-				//     [minVal + step*1, "rgba(85,53,201,255)"],    // 紫色
-				//     [minVal + step*2, "rgba(73,63,189,255)"],    // 蓝紫色
-				//     [minVal + step*3, "rgba(56,93,220,255)"],    // 紫蓝色
-				//     [maxVal, "rgba(66,114,245,255)"]             // 蓝色
-				// ];
-
-				// const localOriginColor1 = [
-				// 	[-100, "rgba(126,84,255,255)"],
-				// 	[-50, "rgba(99,66,255,255)"],
-				// 	[0, "rgba(72,48,255,255)"],
-				// 	[50, "rgba(45,30,255,255)"],
-				// 	[100, "rgba(18,12,255,255)"],
-				// 	[150, "rgba(0,15,240,255)"],
-				// 	[200, "rgba(0,60,195,255)"],
-				// 	[250, "rgba(0,105,150,255)"],
-				// 	[300, "rgba(0,150,105,255)"],
-				// 	[350, "rgba(0,195,60,255)"],
-				// 	[400, "rgba(0,240,15,255)"],
-				// 	[450, "rgba(30,255,0,255)"],
-				// 	[500, "rgba(75,255,0,255)"],
-				// 	[550, "rgba(120,255,0,255)"],
-				// 	[600, "rgba(165,255,0,255)"],
-				// 	[650, "rgba(210,255,0,255)"],
-				// 	[700, "rgba(255,255,0,255)"],
-				// 	[750, "rgba(255,228,0,255)"],
-				// 	[800, "rgba(255,201,0,255)"],
-				// 	[850, "rgba(255,174,0,255)"],
-				// 	[900, "rgba(255,147,0,255)"],
-				// 	[950, "rgba(255,120,0,255)"],
-				// 	[1000, "rgba(255,96,0,255)"],
-				// ];
-
 				const localOriginColor = [
-                    // [-100, "rgba(126,84,255,255)"],
                     [-100, "rgba(126,84,255,255)"],
 					[1.85, "#7D2030"],
 					[64.44, "rgba(99,66,255,255)"],
@@ -256,6 +296,11 @@
 
 			// 解析颜色字符串为THREE.Color
 			function parseColor(colorStr) {
+        // 处理十六进制颜色格式，例如 #7D2030
+        if (colorStr.startsWith('#')) {
+          return new THREE.Color(colorStr);
+        }
+        
 				const rgba = colorStr.match(/\d+/g).map(Number);
 				return new THREE.Color(rgba[0] / 255, rgba[1] / 255, rgba[2] / 255);
 			}
@@ -319,11 +364,13 @@
 
 					material = new THREE.LineBasicMaterial({
 						color: color,
-						linewidth: isSpecificContour ? 3 : 1,
+						linewidth: isSpecificContour ? 2 : 1,
 						depthTest: false,
 						depthWrite: false,
 						transparent: true,
 						opacity: isSpecificContour ? 1.0 : 0.8,
+            linecap: 'round',
+            linejoin: 'round'
 					});
 				} else {
 					material = new THREE.MeshBasicMaterial({
@@ -333,12 +380,75 @@
 						side: THREE.DoubleSide,
 						depthWrite: false,
 						depthTest: true,
+            flatShading: false
 					});
 				}
 
 				materialCache.set(key, material);
 				return material;
 			}
+
+      // 根据给定点创建平滑的Three.js形状
+      function createSmoothShape(points, curveType = 'catmullrom') {
+        const shape = new THREE.Shape();
+        
+        if (points.length < 3) {
+          // 点太少，无法创建平滑曲线，直接创建直线多边形
+          if (points.length > 0) {
+            shape.moveTo(points[0][0], points[0][1]);
+            for (let i = 1; i < points.length; i++) {
+              shape.lineTo(points[i][0], points[i][1]);
+            }
+            shape.closePath();
+          }
+          return shape;
+        }
+        
+        // 第一个点
+        shape.moveTo(points[0][0], points[0][1]);
+        
+        // 使用CatmullRom曲线平滑点
+        if (curveType === 'catmullrom') {
+          const curve = new THREE.CatmullRomCurve3(
+            points.map(p => new THREE.Vector3(p[0], p[1], 0))
+          );
+          curve.closed = true;
+          
+          // 获取曲线上的点
+          const curvePoints = curve.getPoints(Math.max(50, points.length * 4));
+          
+          // 使用曲线点创建形状
+          for (let i = 0; i < curvePoints.length; i++) {
+            shape.lineTo(curvePoints[i].x, curvePoints[i].y);
+          }
+        } else if (curveType === 'bezier') {
+          // 使用贝塞尔曲线
+          const bezierPoints = generateBezierPoints(points, smoothFactor);
+          
+          for (let i = 0; i < bezierPoints.length; i++) {
+            const cmd = bezierPoints[i];
+            
+            if (cmd.type === 'M') {
+              shape.moveTo(cmd.x, cmd.y);
+            } else if (cmd.type === 'C') {
+              shape.bezierCurveTo(cmd.cp1x, cmd.cp1y, cmd.cp2x, cmd.cp2y, cmd.x, cmd.y);
+            } else if (cmd.type === 'Q') {
+              shape.quadraticCurveTo(cmd.cpx, cmd.cpy, cmd.x, cmd.y);
+            } else if (cmd.type === 'L') {
+              shape.lineTo(cmd.x, cmd.y);
+            }
+          }
+        } else {
+          // 简单的点平滑
+          const smoothedPoints = smoothPath(points, smoothFactor);
+          
+          for (let i = 0; i < smoothedPoints.length; i++) {
+            shape.lineTo(smoothedPoints[i][0], smoothedPoints[i][1]);
+          }
+        }
+        
+        return shape;
+      }
 
 			// 创建等值线
 			function createContours() {
@@ -370,63 +480,49 @@
 
 					// 创建等值线的形状
 					for (const polygon of contour.coordinates) {
-						const shape = new THREE.Shape();
-
-						// 遍历轮廓线的点，转换到Three.js坐标系
+						// 处理主轮廓
+						const points = [];
 						for (let j = 0; j < polygon[0].length; j++) {
 							const [x, y] = polygon[0][j];
 
 							// 转换D3网格坐标到数据坐标
-							const dataXPos = x // xMin + (x / (gridSizeX - 1)) * (xMax - xMin);
-							const dataYPos = y //  yMin + (y / (gridSizeY - 1)) * (yMax - yMin);
-
-                            // const dataXPos = xMin + (x / (gridSizeX - 1)) * (xMax - xMin);
-							// const dataYPos = yMin + (y / (gridSizeY - 1)) * (yMax - yMin);
+							const dataXPos = x
+							const dataYPos = y
 
 							// 使用比例尺将数据坐标转换到场景坐标
 							const sceneX = xScale(dataXPos);
 							const sceneY = yScale(dataYPos);
-
-							if (j === 0) {
-								shape.moveTo(sceneX, sceneY);
-							} else {
-								shape.lineTo(sceneX, sceneY);
-							}
+              
+              points.push([sceneX, sceneY]);
 						}
-
-						// 闭合形状
-						shape.closePath();
+            
+            // 使用平滑函数创建形状
+            const shape = createSmoothShape(points, 'catmullrom');
 
 						// 处理内部孔洞
 						for (let j = 1; j < polygon.length; j++) {
-							const hole = new THREE.Path();
-
+							const holePoints = [];
 							for (let k = 0; k < polygon[j].length; k++) {
 								const [x, y] = polygon[j][k];
 
 								// 转换D3网格坐标到数据坐标
-								const dataXPos = x // xMin + (x / (gridSizeX - 1)) * (xMax - xMin);
-								const dataYPos = y // yMin + (y / (gridSizeY - 1)) * (yMax - yMin);
-
-                                // const dataXPos = xMin + (x / (gridSizeX - 1)) * (xMax - xMin);
-								// const dataYPos = yMin + (y / (gridSizeY - 1)) * (yMax - yMin);
+								const dataXPos = x
+								const dataYPos = y
 
 								// 使用比例尺将数据坐标转换到场景坐标
 								const sceneX = xScale(dataXPos);
 								const sceneY = yScale(dataYPos);
-
-								if (k === 0) {
-									hole.moveTo(sceneX, sceneY);
-								} else {
-									hole.lineTo(sceneX, sceneY);
-								}
+                
+                holePoints.push([sceneX, sceneY]);
 							}
-
-							shape.holes.push(hole);
+              
+              // 使用平滑函数创建孔洞
+              const hole = createSmoothShape(holePoints, 'catmullrom');
+              shape.holes.push(hole.curves[0]);
 						}
 
 						// 创建几何体，增加细分以获得更平滑的形状
-						const geometry = new THREE.ShapeGeometry(shape, 32);
+						const geometry = new THREE.ShapeGeometry(shape, 64);
 
 						// 获取当前等值线的颜色
 						const colorStr = getTerrainColor(contour.value);
@@ -491,6 +587,15 @@
 					showContourLines = event.target.checked;
 					createContours(); // 重新创建等值线
 				});
+        
+      // 平滑度滑块事件
+      document
+        .getElementById("smoothFactor")
+        .addEventListener("input", (event) => {
+          smoothFactor = parseFloat(event.target.value);
+          document.getElementById("smoothValue").textContent = smoothFactor.toFixed(1);
+          createContours(); // 重新创建等值线
+        });
 
 			// 窗口大小调整处理
 			window.addEventListener("resize", () => {
