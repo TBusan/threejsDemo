@@ -58,7 +58,7 @@
         // 创建SVG容器
         const svg = d3.select("#chart")
             .append("svg")
-            .attr("width", width)
+            .attr("width", width + 50)
             .attr("height", height)
             .append("g")
             .attr("transform", `translate(${margin.left},${margin.top})`);
@@ -70,14 +70,14 @@
         const zMin = contourData.data.zmin; // 最小值
         const zMax = contourData.data.zmax; // 最大值
         
-        // 创建比例尺
+        // 创建比例尺 - 使用准确的数据范围
         const xScale = d3.scaleLinear()
-            .domain([d3.min(dataX), d3.max(dataX)])
-            .range([innerWidth, 0]);
+            .domain([3.0, 155.0]) // 确保使用数据的确切范围
+            .range([0, innerWidth]);
             
         const yScale = d3.scaleLinear()
-            .domain([d3.min(dataY), d3.max(dataY)])
-            .range([0, innerHeight]);
+            .domain([-29.874, 0]) // 确保使用数据的确切范围
+            .range([innerHeight, 0]);
             
         // 获取数据网格尺寸
         const gridSizeX = dataX.length;
@@ -212,8 +212,12 @@
             });
             
         // 添加坐标轴
-        const xAxis = d3.axisBottom(xScale);
-        const yAxis = d3.axisLeft(yScale);
+        const xAxis = d3.axisBottom(xScale)
+            .ticks(10)
+            .tickFormat(d => d.toFixed(0));
+        const yAxis = d3.axisLeft(yScale)
+            .ticks(15)
+            .tickFormat(d => d.toFixed(1));
         
         svg.append("g")
             .attr("class", "axis")
@@ -237,14 +241,14 @@
             .style("text-anchor", "middle")
             .text("Y轴 (km)");
             
-        // 添加标题
+        // 修改坐标轴和网格标题
         svg.append("text")
             .attr("x", innerWidth / 2)
             .attr("y", -20)
             .attr("text-anchor", "middle")
             .attr("font-size", "16px")
             .attr("font-weight", "bold")
-            .text("流场数据等值线图 (带掩膜效果)");
+            .text("流场数据等值线图 (带掩膜效果) Y范围: " + d3.min(dataY).toFixed(1) + " 到 " + d3.max(dataY).toFixed(1));
             
         // 创建颜色图例
         const legendWidth = 300;
