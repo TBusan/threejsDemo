@@ -1,0 +1,518 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <title>Plotly.js + Three.js 等值线渲染</title>
+    <!-- <script src="https://cdn.plot.ly/plotly-latest.min.js"></script> -->
+    <script src="https://cdn.plot.ly/plotly-2.27.0.min.js"></script>
+    <script src="https://d3js.org/d3.v7.min.js"></script>
+    <style>
+        body {
+            margin: 0;
+            overflow: hidden;
+            font-family: Arial, sans-serif;
+        }
+        
+        #info {
+            position: absolute;
+            top: 10px;
+            width: 100%;
+            text-align: center;
+            color: white;
+            font-family: Arial, sans-serif;
+            z-index: 100;
+        }
+        
+        #controls {
+            position: absolute;
+            top: 40px;
+            left: 10px;
+            background: rgba(0, 0, 0, 0.7);
+            padding: 10px;
+            border-radius: 5px;
+            color: white;
+            z-index: 100;
+        }
+
+        .hidden {
+            display: none;
+        }
+        
+        #plotly-container {
+            width: 800px;
+            height: 600px;
+            position: absolute;
+            top: 0;
+            left: 0;
+            opacity: 0;
+            pointer-events: none;
+        }
+        
+        #three-container {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+        }
+    </style>
+</head>
+<body>
+    <div id="info">Plotly.js + Three.js 等值线渲染</div>
+    <div id="controls">
+        <div>
+            <label><input type="checkbox" id="showContourLines" checked />显示等值线轮廓</label>
+        </div>
+        <div>
+            <button id="toggleView">切换查看 Plotly</button>
+        </div>
+    </div>
+    
+    <!-- Plotly容器，默认隐藏但生成数据 -->
+    <div id="plotly-container" class="hidden"></div>
+    
+    <!-- Three.js容器 -->
+    <div id="three-container"></div>
+    
+    <script type="importmap">
+        {
+            "imports": {
+                "three": "../../build/three.module.js",
+                "three/addons/": "../../examples/jsm/"
+            }
+        }
+    </script>
+    
+    <script type="module">
+        // 导入必要的库
+        import * as THREE from "three";
+        import { OrbitControls } from "three/addons/controls/OrbitControls.js";
+        import Stats from "three/addons/libs/stats.module.js";
+        import { contourData } from "../d3_contour/contourData.js";
+        
+        // 提取数据
+        const dataX = contourData.data.x;
+        const dataY = contourData.data.y;
+        const dataValues = contourData.data.v;
+        const zMin = contourData.data.zmin;
+        const zMax = contourData.data.zmax;
+        
+        // 获取数据网格尺寸
+        const gridSizeX = dataX.length;
+        const gridSizeY = dataY.length;
+        
+        // 计算数据的真实长宽比
+        const xMin = d3.min(dataX);
+        const xMax = d3.max(dataX);
+        const yMin = d3.min(dataY);
+        const yMax = d3.max(dataY);
+        const dataAspectRatio = (xMax - xMin) / Math.abs(yMax - yMin);
+        
+        console.log(`数据范围: X:${xMin}-${xMax}, Y:${yMin}-${yMax}, 长宽比:${dataAspectRatio.toFixed(2)}`);
+        
+        // 准备Plotly显示的Z数据
+        const zData = [];
+        for (let y = 0; y < gridSizeY; y++) {
+            const row = [];
+            for (let x = 0; x < gridSizeX; x++) {
+                const value = dataValues[y][x];
+                row.push(value === null ? undefined : value);
+            }
+            zData.push(row);
+        }
+        
+        // 定义Plotly等值线的阈值
+        const contourLevels = [
+            1.85, 64.44, 127.04, 189.63, 252.23, 314.83, 377.42, 440.02, 
+            502.61, 565.21, 627.8, 690.4, 752.99, 815.59, 878.18, 940.78
+        ];
+        
+        // 创建Plotly等值线图
+        const plotlyData = [{
+            z: zData,
+            x: dataX,
+            y: dataY,
+            type: 'contour',
+            contours: {
+                coloring: 'heatmap',
+                showlabels: true,
+                start: zMin,
+                end: zMax,
+                size: (zMax - zMin) / 20,
+                labelfont: {
+                    family: 'Arial',
+                    size: 12,
+                    color: 'white'
+                }
+            },
+            colorscale: [
+                [0, 'rgb(76,29,143)'],
+                [0.0625, 'rgb(85,53,201)'],
+                [0.125, 'rgb(73,63,189)'],
+                [0.1875, 'rgb(56,93,220)'],
+                [0.25, 'rgb(0,15,240)'],
+                [0.3125, 'rgb(0,60,195)'],
+                [0.375, 'rgb(0,105,150)'],
+                [0.4375, 'rgb(0,150,105)'],
+                [0.5, 'rgb(0,195,60)'],
+                [0.5625, 'rgb(0,240,15)'],
+                [0.625, 'rgb(30,255,0)'],
+                [0.6875, 'rgb(75,255,0)'],
+                [0.75, 'rgb(120,255,0)'],
+                [0.8125, 'rgb(165,255,0)'],
+                [0.875, 'rgb(210,255,0)'],
+                [0.9375, 'rgb(255,255,0)'],
+                [1, 'rgb(255,228,0)']
+            ],
+            zmin: zMin,
+            zmax: zMax
+        }];
+        
+        const plotlyLayout = {
+            title: '等值线数据 (Plotly.js)',
+            width: 800,
+            height: 600,
+            margin: { t: 50, r: 50, b: 50, l: 50 },
+            plot_bgcolor: '#222',
+            paper_bgcolor: '#222',
+            font: { color: '#fff' }
+        };
+        
+        // 渲染Plotly图形（不显示，仅用于生成数据）
+        Plotly.newPlot('plotly-container', plotlyData, plotlyLayout).then(() => {
+            // 等Plotly渲染完成后，从DOM中提取等值线数据
+            extractContourDataAndRenderThree();
+        });
+        
+        // 从Plotly生成的SVG中提取等值线数据
+        function extractContourDataAndRenderThree() {
+            // 获取Plotly生成的所有路径元素（等值线）
+            const paths = document.querySelectorAll('#plotly-container .contour path');
+            const contours = [];
+            
+            // 提取每条等值线的路径数据和值
+            paths.forEach((path, index) => {
+                const pathData = path.getAttribute('d');
+                if (!pathData) return;
+                
+                // 尝试获取等值线的值（从Plotly生成的路径属性或从标签中提取）
+                let value = index * (zMax - zMin) / paths.length;
+                const fillColor = path.getAttribute('fill') || '';
+                
+                // 创建路径解析器
+                const pathParser = new DOMPoint();
+                const coordinates = [];
+                let currentPoint = [];
+                
+                // 解析SVG路径数据
+                const commands = pathData.match(/[MLZ][^MLZ]*/g) || [];
+                commands.forEach(cmd => {
+                    const type = cmd[0];
+                    const args = cmd.substring(1).trim().split(/[\s,]+/).map(parseFloat);
+                    
+                    if (type === 'M') {
+                        // 移动命令 - 开始新的轮廓
+                        currentPoint = [args[0], args[1]];
+                        coordinates.push([currentPoint]);
+                    } else if (type === 'L') {
+                        // 线段命令 - 添加点到当前轮廓
+                        currentPoint = [args[0], args[1]];
+                        if (coordinates.length > 0) {
+                            coordinates[coordinates.length - 1].push(currentPoint);
+                        }
+                    } else if (type === 'Z') {
+                        // 闭合路径
+                        if (coordinates.length > 0 && coordinates[coordinates.length - 1].length > 0) {
+                            // 添加第一个点以闭合路径
+                            const firstPoint = coordinates[coordinates.length - 1][0];
+                            coordinates[coordinates.length - 1].push([...firstPoint]);
+                        }
+                    }
+                });
+                
+                // 将路径添加到等值线数据
+                contours.push({
+                    value: value,
+                    coordinates: coordinates,
+                    color: fillColor
+                });
+            });
+            
+            console.log("从Plotly提取的等值线数据:", contours.length, "条等值线");
+            
+            // 使用THREE.js渲染等值线
+            initThreeRenderer(contours);
+        }
+        
+        // THREE.js渲染相关变量
+        let scene, camera, renderer, controls, stats;
+        let contourMeshes = [];
+        let showContourLines = true;
+        
+        // 初始化THREE.js渲染
+        function initThreeRenderer(contours) {
+            // 创建THREE.js场景
+            scene = new THREE.Scene();
+            scene.background = new THREE.Color(0x222222);
+            
+            // 计算THREE.js场景中的坐标范围，保持数据比例
+            const sceneHeight = 1.0;
+            const sceneWidth = sceneHeight * dataAspectRatio;
+            
+            // 创建坐标比例尺
+            const xScale = d3.scaleLinear()
+                .domain([xMin, xMax])
+                .range([-sceneWidth/2, sceneWidth/2]);
+                
+            const yScale = d3.scaleLinear()
+                .domain([yMin, yMax])
+                .range([sceneHeight/2, -sceneHeight/2]);
+                
+            // 调整相机位置以适应场景
+            const cameraDistance = Math.max(dataAspectRatio, 2) * 1.2;
+            
+            // 创建相机
+            camera = new THREE.PerspectiveCamera(
+                60,
+                window.innerWidth / window.innerHeight,
+                0.1,
+                1000
+            );
+            camera.position.set(0, 0, cameraDistance);
+            
+            // 创建渲染器
+            renderer = new THREE.WebGLRenderer({
+                antialias: true,
+                logarithmicDepthBuffer: true
+            });
+            renderer.setPixelRatio(window.devicePixelRatio);
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            document.getElementById("three-container").appendChild(renderer.domElement);
+            
+            // 添加轨道控制
+            controls = new OrbitControls(camera, renderer.domElement);
+            controls.enableDamping = true;
+            controls.dampingFactor = 0.25;
+            
+            // 添加性能监视器
+            stats = new Stats();
+            stats.domElement.style.position = "absolute";
+            stats.domElement.style.top = "0px";
+            document.getElementById("three-container").appendChild(stats.domElement);
+            
+            // 添加光源
+            const ambientLight = new THREE.AmbientLight(0xffffff, 0.6);
+            scene.add(ambientLight);
+            
+            const directionalLight = new THREE.DirectionalLight(0xffffff, 0.8);
+            directionalLight.position.set(1, 1, 1);
+            scene.add(directionalLight);
+            
+            // 创建等值线
+            renderContours(contours, xScale, yScale);
+            
+            // 动画循环
+            animate();
+            
+            // 添加事件监听器
+            document.getElementById("showContourLines").addEventListener("change", event => {
+                showContourLines = event.target.checked;
+                renderContours(contours, xScale, yScale);
+            });
+            
+            document.getElementById("toggleView").addEventListener("click", toggleView);
+        }
+        
+        // 渲染等值线
+        function renderContours(contours, xScale, yScale) {
+            // 清除现有的等值线网格
+            contourMeshes.forEach(mesh => {
+                scene.remove(mesh);
+                if (mesh.geometry) mesh.geometry.dispose();
+                if (mesh.material) mesh.material.dispose();
+            });
+            contourMeshes = [];
+            
+            // 颜色函数 - 根据值获取颜色
+            function getColorFromValue(value) {
+                // 归一化值到0-1范围
+                const normalizedValue = (value - zMin) / (zMax - zMin);
+                
+                // 定义颜色梯度
+                const colors = [
+                    { pos: 0, color: new THREE.Color(0x4c1d8f) },
+                    { pos: 0.125, color: new THREE.Color(0x5535c9) },
+                    { pos: 0.25, color: new THREE.Color(0x493fbd) },
+                    { pos: 0.375, color: new THREE.Color(0x385ddc) },
+                    { pos: 0.5, color: new THREE.Color(0x4272f5) },
+                    { pos: 0.625, color: new THREE.Color(0x00f00f) },
+                    { pos: 0.75, color: new THREE.Color(0x7bff00) },
+                    { pos: 0.875, color: new THREE.Color(0xd2ff00) },
+                    { pos: 1, color: new THREE.Color(0xffe400) }
+                ];
+                
+                // 找到颜色区间
+                let startColor, endColor, t;
+                for (let i = 0; i < colors.length - 1; i++) {
+                    if (normalizedValue >= colors[i].pos && normalizedValue <= colors[i + 1].pos) {
+                        startColor = colors[i].color;
+                        endColor = colors[i + 1].color;
+                        t = (normalizedValue - colors[i].pos) / (colors[i + 1].pos - colors[i].pos);
+                        break;
+                    }
+                }
+                
+                // 如果超出范围，使用边界颜色
+                if (!startColor) {
+                    return normalizedValue <= 0 ? colors[0].color : colors[colors.length - 1].color;
+                }
+                
+                // 插值颜色
+                const color = new THREE.Color();
+                color.r = startColor.r + (endColor.r - startColor.r) * t;
+                color.g = startColor.g + (endColor.g - startColor.g) * t;
+                color.b = startColor.b + (endColor.b - startColor.b) * t;
+                
+                return color;
+            }
+            
+            // 确保从低值到高值的顺序处理等值线
+            const sortedContours = [...contours].sort((a, b) => a.value - b.value);
+            
+            // 渲染每个等值线
+            for (let i = 0; i < sortedContours.length; i++) {
+                const contour = sortedContours[i];
+                
+                // 跳过没有坐标的等值线
+                if (!contour.coordinates || contour.coordinates.length === 0) continue;
+                
+                // 处理每个多边形
+                for (const polygon of contour.coordinates) {
+                    // 创建形状
+                    const shape = new THREE.Shape();
+                    
+                    // 确保有足够的点
+                    if (!polygon || polygon.length < 3) continue;
+                    
+                    // 第一个点作为起点
+                    let firstPoint = polygon[0];
+                    if (!firstPoint || !Array.isArray(firstPoint) || firstPoint.length < 2) continue;
+                    
+                    // 转换到场景坐标
+                    const startX = xScale(firstPoint[0]);
+                    const startY = yScale(firstPoint[1]);
+                    shape.moveTo(startX, startY);
+                    
+                    // 添加其余点
+                    for (let j = 1; j < polygon.length; j++) {
+                        const point = polygon[j];
+                        if (!point || !Array.isArray(point) || point.length < 2) continue;
+                        
+                        const x = xScale(point[0]);
+                        const y = yScale(point[1]);
+                        shape.lineTo(x, y);
+                    }
+                    
+                    // 闭合形状
+                    shape.closePath();
+                    
+                    // 创建几何体和材质
+                    const geometry = new THREE.ShapeGeometry(shape, 32);
+                    const color = getColorFromValue(contour.value);
+                    
+                    const material = new THREE.MeshBasicMaterial({
+                        color: color,
+                        transparent: true,
+                        opacity: 0.8,
+                        side: THREE.DoubleSide,
+                        depthWrite: false
+                    });
+                    
+                    // 创建网格
+                    const mesh = new THREE.Mesh(geometry, material);
+                    
+                    // 设置z位置和渲染顺序
+                    const zOffset = 0.0001 * i;
+                    mesh.position.z = zOffset;
+                    mesh.renderOrder = i;
+                    
+                    // 添加到场景
+                    scene.add(mesh);
+                    contourMeshes.push(mesh);
+                    
+                    // 如果需要显示等值线轮廓
+                    if (showContourLines) {
+                        // 检查是否是特定值的等值线
+                        const isSpecificValue = contourLevels.includes(contour.value);
+                        
+                        // 创建线条几何体
+                        const lineGeometry = new THREE.EdgesGeometry(geometry);
+                        const lineColor = isSpecificValue ? 0xFFFFFF : 0x888888;
+                        const lineOpacity = isSpecificValue ? 1.0 : 0.8;
+                        const lineWidth = isSpecificValue ? 2 : 1;
+                        
+                        const lineMaterial = new THREE.LineBasicMaterial({
+                            color: lineColor,
+                            linewidth: lineWidth,
+                            transparent: true,
+                            opacity: lineOpacity,
+                            depthTest: false,
+                            depthWrite: false
+                        });
+                        
+                        const line = new THREE.LineSegments(lineGeometry, lineMaterial);
+                        
+                        // 设置z位置和渲染顺序
+                        line.position.z = zOffset + 0.0001;
+                        line.renderOrder = sortedContours.length + i;
+                        
+                        // 添加到场景
+                        scene.add(line);
+                        contourMeshes.push(line);
+                    }
+                }
+            }
+        }
+        
+        // 切换查看模式 - Plotly或Three.js
+        function toggleView() {
+            const plotlyContainer = document.getElementById('plotly-container');
+            const threeContainer = document.getElementById('three-container');
+            const button = document.getElementById('toggleView');
+            
+            if (plotlyContainer.classList.contains('hidden')) {
+                // 显示Plotly
+                plotlyContainer.classList.remove('hidden');
+                plotlyContainer.style.opacity = '1';
+                plotlyContainer.style.pointerEvents = 'auto';
+                threeContainer.style.opacity = '0';
+                threeContainer.style.pointerEvents = 'none';
+                button.textContent = '切换查看 Three.js';
+            } else {
+                // 显示Three.js
+                plotlyContainer.classList.add('hidden');
+                plotlyContainer.style.opacity = '0';
+                plotlyContainer.style.pointerEvents = 'none';
+                threeContainer.style.opacity = '1';
+                threeContainer.style.pointerEvents = 'auto';
+                button.textContent = '切换查看 Plotly';
+            }
+        }
+        
+        // 动画循环
+        function animate() {
+            requestAnimationFrame(animate);
+            controls.update();
+            renderer.render(scene, camera);
+            stats.update();
+        }
+        
+        // 窗口大小调整处理
+        window.addEventListener("resize", () => {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        });
+    </script>
+</body>
+</html>

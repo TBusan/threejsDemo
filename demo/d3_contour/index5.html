@@ -1,10 +1,10 @@
 <!DOCTYPE html>
 <html>
-	<head>
+<head>
 		<meta charset="utf-8" />
 		<title>Three.js 渲染D3.js等值线图</title>
-		<script src="https://d3js.org/d3.v7.min.js"></script>
-		<style>
+    <script src="https://d3js.org/d3.v7.min.js"></script>
+    <style>
 			body {
 				margin: 0;
 				overflow: hidden;
@@ -21,24 +21,24 @@
 				font-family: Arial, sans-serif;
 			}
 			#controls {
-				position: absolute;
+            position: absolute;
 				top: 40px;
 				left: 10px;
 				background: rgba(0, 0, 0, 0.5);
 				padding: 10px;
 				border-radius: 5px;
-				color: white;
+            color: white;
 				font-family: Arial, sans-serif;
 			}
 			#colorScale {
-				margin-top: 10px;
+            margin-top: 10px;
 				width: 300px;
 				height: 30px;
 				position: relative;
-			}
-		</style>
-	</head>
-	<body>
+        }
+    </style>
+</head>
+<body>
 		<div id="info">D3等值线数据 + Three.js渲染</div>
 		<div id="controls">
 			<div>
@@ -50,7 +50,7 @@
 					/>显示等值线轮廓</label
 				>
 			</div>
-		</div>
+    </div>
 		<div id="container"></div>
 
 		<script type="importmap">
@@ -62,7 +62,7 @@
 			}
 		</script>
 
-		<script type="module">
+    <script type="module">
 			// 导入必要的库
 			import * as THREE from "three";
 			import { OrbitControls } from "three/addons/controls/OrbitControls.js";
@@ -70,48 +70,48 @@
 			import { contourData } from "./contourData.js";
 
 			// ===== D3.js 部分：生成等值线数据 =====
-			// 配置参数
-			const width = 800;
-			const height = 600;
+        // 配置参数
+        const width = 800;
+        const height = 600;
 			const aspectRatio = width / height;
 
 			// 控制参数
 			let showContourLines = true; // 显示等值线轮廓
 			let showContourLabels = false; // 显示等值线标注
-
-			// 解析contourData数据
-			const dataX = contourData.data.x; // X坐标数组
-			const dataY = contourData.data.y; // Y坐标数组
-			const dataValues = contourData.data.v; // 值的二维数组
-			const zMin = contourData.data.zmin; // 最小值
-			const zMax = contourData.data.zmax; // 最大值
-
-			// 获取数据网格尺寸
-			const gridSizeX = dataX.length;
-			const gridSizeY = dataY.length;
-
-			// 创建一维数组来存储数据，以供D3使用
-			const gridData = new Array(gridSizeY * gridSizeX);
-
-			// 处理contourData中的数据，转换为D3可用的格式
-			function processContourData() {
-				// 将二维数组扁平化为一维
-				for (let y = 0; y < gridSizeY; y++) {
-					for (let x = 0; x < gridSizeX; x++) {
-						const value = dataValues[y][x];
-
-						// null值处理：将null值替换为undefined，让D3自动跳过这些区域
-						if (value === null) {
-							gridData[y * gridSizeX + x] = undefined;
-						} else {
-							gridData[y * gridSizeX + x] = value;
-						}
-					}
-				}
-
-				return gridData;
-			}
-
+            
+        // 解析contourData数据
+        const dataX = contourData.data.x; // X坐标数组
+        const dataY = contourData.data.y; // Y坐标数组
+        const dataValues = contourData.data.v; // 值的二维数组
+        const zMin = contourData.data.zmin; // 最小值
+        const zMax = contourData.data.zmax; // 最大值
+            
+        // 获取数据网格尺寸
+        const gridSizeX = dataX.length;
+        const gridSizeY = dataY.length;
+        
+        // 创建一维数组来存储数据，以供D3使用
+        const gridData = new Array(gridSizeY * gridSizeX);
+        
+        // 处理contourData中的数据，转换为D3可用的格式
+        function processContourData() {
+            // 将二维数组扁平化为一维
+            for (let y = 0; y < gridSizeY; y++) {
+                for (let x = 0; x < gridSizeX; x++) {
+                    const value = dataValues[y][x];
+                    
+                    // null值处理：将null值替换为undefined，让D3自动跳过这些区域
+                    if (value === null) {
+                        gridData[y * gridSizeX + x] = undefined;
+                    } else {
+                        gridData[y * gridSizeX + x] = value;
+                    }
+                }
+            }
+            
+            return gridData;
+        }
+        
 			// 获取实际的数据范围
 			const xMin = d3.min(dataX);
 			const xMax = d3.max(dataX);
@@ -143,33 +143,33 @@
 				.domain([yMin, yMax])
 				.range([sceneHeight / 2, -sceneHeight / 2]); // Y轴翻转，因为Three.js和屏幕坐标Y轴方向相反
 
-			// 生成地形数据
-			const processedGridData = processContourData();
-
-			// 基于数据范围自动生成等值线阈值
-			const valueRange = zMax - zMin;
-			const thresholdCount = 20;
-			const thresholds = [];
-
-			// 添加特定阈值
+        // 生成地形数据
+        const processedGridData = processContourData();
+        
+        // 基于数据范围自动生成等值线阈值
+        const valueRange = zMax - zMin;
+        const thresholdCount = 20;
+        const thresholds = [];
+        
+        // 添加特定阈值
 			// const specificThresholds = [-100,-50, 0, 50,100,150, 200,250, 300,350, 400,450, 500,550,600,650,700,750,800,850,900, 980];
 			const specificThresholds = [-100,
 				1.85, 64.44, 127.04, 189.63, 252.23, 314.83, 377.42, 440.02, 502.61, 565.21, 627.8, 690.4, 752.99,
 				815.59, 878.18, 940.78
 			];
-			// 使用d3.contours()从处理后的网格数据生成等值线
-			const contourGenerator = d3
-				.contours()
-				.size([gridSizeX, gridSizeY])
+        // 使用d3.contours()从处理后的网格数据生成等值线
+        const contourGenerator = d3
+            .contours()
+            .size([gridSizeX, gridSizeY])
 				.thresholds(specificThresholds)
 				.smooth(true); // 启用平滑处理
-
-			// 计算等值线
-			let contours = contourGenerator(processedGridData);
+            
+        // 计算等值线
+        let contours = contourGenerator(processedGridData);
 
 			console.log("==contours==", contours);
-
-			// 颜色比例尺 - 使用紫蓝色系
+        
+        // 颜色比例尺 - 使用紫蓝色系
 			function getTerrainColor(value) {
 				// 根据数据范围创建颜色映射
 				// const minVal = zMin;
@@ -508,6 +508,6 @@
 			}
 
 			animate();
-		</script>
-	</body>
+    </script>
+</body>
 </html>
