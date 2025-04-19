@@ -4,6 +4,7 @@
     <meta charset="utf-8">
     <title>D3.js 带掩膜等值线图</title>
     <script src="https://d3js.org/d3.v7.min.js"></script>
+    <!-- <script src="./d3-contour"></script> -->
     <style>
         .container {
             margin: 20px;
@@ -46,40 +47,12 @@
     <div class="tooltip"></div>
 
     <script type="module">
+        // import contours  from "./d3-contour.js";
+        // import d3Contour from "./d3-contour.js";
         import { contourData } from './contourData.js';
-        
-        // 简单克里金插值函数
-        function krigingSimple(dataPoints, x, y, power = 2, smoothing = 0.1) {
-            // 计算距离
-            function distance(p1, p2) {
-                return Math.sqrt(Math.pow(p1[0] - p2[0], 2) + Math.pow(p1[1] - p2[1], 2));
-            }
-            
-            // 计算权重 - 反距离加权法
-            function calculateWeight(dist, power) {
-                // 平滑因子防止除以零
-                if (dist < smoothing) {
-                    dist = smoothing;
-                }
-                return 1.0 / Math.pow(dist, power);
-            }
-            
-            let weightSum = 0;
-            let valueSum = 0;
-            
-            for (let i = 0; i < dataPoints.length; i++) {
-                const [xi, yi, value] = dataPoints[i];
-                const dist = distance([x, y], [xi, yi]);
-                const weight = calculateWeight(dist, power);
-                weightSum += weight;
-                valueSum += weight * value;
-            }
-            
-            // 防止除以零
-            if (weightSum === 0) return null;
-            
-            return valueSum / weightSum;
-        }
+
+        import  { contours, contourDensity }  from './d3_zoutao.js';
+        // debugger
         
         // 配置参数
         const width = 800;
@@ -141,31 +114,13 @@
         // 生成地形数据
         const processedGridData = processContourData();
         
-        // 准备用于克里金插值的参考数据点
-        // 从原始网格中创建参考点数组：[x, y, value]
-        const referencePoints = [];
-        // 每隔几个点取一个，避免处理过多数据点
-        const sampleInterval = 3; // 取样间隔
-        
-        for (let y = 0; y < gridSizeY; y += sampleInterval) {
-            for (let x = 0; x < gridSizeX; x += sampleInterval) {
-                const value = dataValues[y][x];
-                // 只加入非null的数据点
-                if (value !== null) {
-                    referencePoints.push([dataX[x], dataY[y], x, y]); // [实际x坐标, 实际y坐标, x索引, y索引]
-                }
-            }
-        }
-        
-        console.log('Reference points for kriging:', referencePoints.length);
-        
         // 基于数据范围自动生成等值线阈值
         const valueRange = zMax - zMin;
         const thresholdCount = 20;
         const thresholds = [];
         
         // 添加特定阈值
-        const specificThresholds = [0,100, 200, 300, 400, 500,1000];
+        const specificThresholds = [-100,0,100, 200, 300, 400, 500,1000];
         
         // 首先添加特定阈值
         specificThresholds.forEach(val => {
@@ -191,25 +146,28 @@
         console.log('thresholds==',thresholds);
         
         // 使用d3.contours()从处理后的网格数据生成等值线
-        const contourGenerator = d3
-            .contours()
+
+
+
+
+
+        const contourGenerator = contours()
             .size([gridSizeX, gridSizeY])
-            .thresholds(thresholds);
+            .thresholds(specificThresholds).smooth('linearDual');//linearDual  bilinear
             
         // 计算等值线
-        let contours = contourGenerator(processedGridData);
+        let d3_contours = contourGenerator(processedGridData);
 
-        console.log('contours==',contours);
+        console.log('d3_contours==',d3_contours);
         
-
-        // 计算数据范围边界（提前计算以提高性能）
+        // 计算数据范围边界
         const xMin = Math.min(...dataX);
         const xMax = Math.max(...dataX);
         const yMin = Math.min(...dataY);
         const yMax = Math.max(...dataY);
-
-        // 转换等值线网格索引为实际坐标
-        contours = contours.map(contour => {
+        
+        // 转换等值线网格索引为实际地理坐标，然后映射到屏幕坐标
+        const transformedContours = d3_contours.map(contour => {
             // 创建一个新的contour对象，保留原始的value和type
             const newContour = {
                 type: contour.type,
@@ -225,80 +183,23 @@
                         const x = point[0];
                         const y = point[1];
                         
-                        // 使用克里金插值计算实际坐标
-                        // 收集周围的数据点
-                        const nearbyPoints = [];
-                        const searchRadius = 5; // 搜索半径（网格单位）
+                        // 网格索引到实际坐标的线性映射
+                        // 计算相对位置 (0-1范围)
+                        const xRatio = Math.max(0, Math.min(x / (gridSizeX - 1), 1));
+                        const yRatio = Math.max(0, Math.min(y / (gridSizeY - 1), 1));
                         
-                        // 找出最近的几个参考点
-                        for (const refPoint of referencePoints) {
-                            const refX = refPoint[2]; // x索引
-                            const refY = refPoint[3]; // y索引
-                            
-                            // 计算网格索引距离
-                            const gridDist = Math.sqrt(Math.pow(x - refX, 2) + Math.pow(y - refY, 2));
-                            
-                            if (gridDist <= searchRadius) {
-                                // 添加到附近点列表: [实际x, 实际y, 权重值]
-                                nearbyPoints.push([refPoint[0], refPoint[1], 1 / (gridDist + 0.1)]); // 添加小值防止除零
-                            }
-                        }
+                        // 实际地理坐标
+                        const geoX = xMin + xRatio * (xMax - xMin);
+                        const geoY = yMin + yRatio * (yMax - yMin);
                         
-                        // 如果找不到足够的参考点，则回退到最近的几个点
-                        if (nearbyPoints.length < 3) {
-                            // 对参考点按照网格距离排序
-                            const sortedPoints = referencePoints
-                                .map(refPoint => {
-                                    const gridDist = Math.sqrt(Math.pow(x - refPoint[2], 2) + Math.pow(y - refPoint[3], 2));
-                                    return {...refPoint, dist: gridDist};
-                                })
-                                .sort((a, b) => a.dist - b.dist)
-                                .slice(0, 4); // 取最近的4个点
-                                
-                            nearbyPoints.length = 0;
-                            for (const point of sortedPoints) {
-                                nearbyPoints.push([point[0], point[1], 1 / (point.dist + 0.1)]);
-                            }
-                        }
-                        
-                        let actualX, actualY;
-                        
-                        if (nearbyPoints.length > 0) {
-                            // 使用简化的克里金算法计算权重插值
-                            let totalWeight = 0;
-                            let weightedSumX = 0;
-                            let weightedSumY = 0;
-                            
-                            for (const [px, py, weight] of nearbyPoints) {
-                                totalWeight += weight;
-                                weightedSumX += px * weight;
-                                weightedSumY += py * weight;
-                            }
-                            
-                            actualX = weightedSumX / totalWeight;
-                            actualY = weightedSumY / totalWeight;
-                        } else {
-                            // 回退到最简单的方案：在实际坐标范围内线性映射
-                            const xRatio = x / (gridSizeX - 1);
-                            const yRatio = y / (gridSizeY - 1);
-                            actualX = xMin + xRatio * (xMax - xMin);
-                            actualY = yMin + yRatio * (yMax - yMin);
-                        }
-                        
-                        // 确保坐标不超出数据范围
-                        actualX = Math.max(xMin, Math.min(actualX, xMax));
-                        actualY = Math.max(yMin, Math.min(actualY, yMax));
-                        
-                        // 返回实际坐标
-                        return [actualX, actualY];
+                        // 直接返回屏幕坐标
+                        return [xScale(geoX), yScale(geoY)];
                     });
                 });
             });
             
             return newContour;
         });
-        
-        console.log('transformed contours==', contours);
         
         // 颜色比例尺 - 使用紫蓝色系
         const colorScale = d3.scaleSequential()
@@ -311,36 +212,28 @@
                 "#4272f5"  // 蓝色
             ]));
             
-        // 创建从实际坐标映射到屏幕坐标的转换函数
-        const coordToScreenTransform = d3.geoTransform({
-            point: function(x, y) {
-                // 使用比例尺将实际坐标转换为屏幕坐标
-                this.stream.point(xScale(x), yScale(y));
-            }
-        });
+        // 创建地理路径生成器 - 不使用投影，因为坐标已经转换为屏幕坐标
+        const path = d3.geoPath();
         
-        // 创建地理路径生成器，使用实际坐标到屏幕坐标的转换
-        const path = d3.geoPath().projection(coordToScreenTransform);
-        
-        // 添加更精确的剪切路径，限制在数据有效范围内
+        // 添加精确的剪切路径，限制在数据有效范围内
         svg.append("defs")
             .append("clipPath")
             .attr("id", "data-clip")
             .append("rect")
-            .attr("x", xScale(Math.min(...dataX)))
-            .attr("y", yScale(Math.max(...dataY)))
-            .attr("width", xScale(Math.max(...dataX)) - xScale(Math.min(...dataX)))
-            .attr("height", yScale(Math.min(...dataY)) - yScale(Math.max(...dataY)));
+            .attr("x", xScale(xMin))
+            .attr("y", yScale(yMax))
+            .attr("width", xScale(xMax) - xScale(xMin))
+            .attr("height", yScale(yMin) - yScale(yMax));
             
         // 绘制等值线区域
         const contourLayer = svg.append("g")
             .attr("clip-path", "url(#data-clip)");
             
         contourLayer.selectAll("path")
-            .data(contours)
+            .data(transformedContours)
             .enter()
             .append("path")
-            .attr("d", path) // 直接使用path函数，不需要额外转换
+            .attr("d", path) // 使用path直接渲染已转换的坐标
             .attr("fill", d => colorScale(d.value))
             .attr("stroke", "#333")
             .attr("stroke-width", d => {
