@@ -28,6 +28,14 @@ class DMOctreeLoader {
         this.frustumCullingEnabled = true;
         this.visibleNodes = {};
         this._lastLODLevel = undefined;
+        // 性能优化设置
+        this.useIndexBuffer = true; // 使用索引缓冲区而不是位置修改
+        this._lastCullingTime = 0;
+        this._cullingInterval = 100; // 视锥剔除的最小间隔时间（毫秒）
+        this._lastCameraPosition = new THREE.Vector3();
+        this._lastCameraDirection = new THREE.Vector3();
+        this._cullStatsCounter = 0;
+        this._lastUpdateFrame = 0;
     }
 
     // 加载DM格式文件
@@ -812,217 +820,136 @@ class DMOctreeLoader {
         return newLevel;
     }
     
-    // 添加视锥剔除功能
-    performFrustumCulling(camera) {
-        if (!this.frustumCullingEnabled) return;
+    // 基于八叉树的层次化视锥剔除 - 最高效的剔除方法
+    performOctreeBasedCulling(level, frustum) {
+        // 创建临时容器存储可见节点索引
+        const visibleIndices = new Set();
+        const mesh = this.lodMeshes[level];
+        const positions = mesh.geometry.attributes.position;
         
-        // 仅处理当前LOD级别，减少不必要的计算
-        const currentLevel = this._lastLODLevel !== undefined ? this._lastLODLevel : 0;
-        if (!this.lodMeshes[currentLevel]) return;
-
-        // 创建视锥对象
-        const frustum = new THREE.Frustum();
-        const projScreenMatrix = new THREE.Matrix4();
+        // 调试信息
+        let nodesTested = 0;
+        let nodesInFrustum = 0;
+        let pointsFound = 0;
+        let pointsMatched = 0;
         
-        // 计算视锥体
-        projScreenMatrix.multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse);
-        frustum.setFromProjectionMatrix(projScreenMatrix);
-        
-        // 清除当前LOD级别的可见节点记录
-        this.visibleNodes = {};
-        this.visibleNodes[currentLevel] = new Set();
-        
-        const mesh = this.lodMeshes[currentLevel];
-        const geometry = mesh.geometry;
-        const positions = geometry.attributes.position;
-        const count = positions.count;
-        
-        // 如果点数量少，进行精确剔除
-        if (count <= 5000) {
-            this.performPreciseCulling(currentLevel, frustum);
-        } 
-        // 点数量中等，使用改进的分块剔除
-        else if (count <= 50000) {
-            this.performBlockCulling(currentLevel, frustum, positions, camera);
-        } 
-        // 点数量大，使用高效剔除或禁用剔除
-        else {
-            this.performSimplifiedCulling(currentLevel, frustum, positions);
-        }
-    }
-    
-    // 精确剔除 - 适用于点数量少的情况
-    performPreciseCulling(level, frustum) {
-        const nodes = this.precomputedLOD && this.precomputedLOD[level] ? 
-            this.precomputedLOD[level] : 
-            (level < this.allNodes.length ? this.allNodes.filter(n => n.depth <= level) : []);
-        
-        if (nodes.length === 0) return;
-        
-        // 创建节点索引映射，避免多次调用indexOf
-        const nodeIndexMap = new Map();
-        const positions = this.lodMeshes[level].geometry.attributes.position;
-        const count = positions.count;
-        
-        for (let i = 0; i < Math.min(nodes.length, count); i++) {
-            nodeIndexMap.set(nodes[i], i);
+        // 仅在需要时输出详细日志
+        if (this._cullStatsCounter % 30 === 0) {
+            console.log("开始八叉树剔除", {
+                rootNode: !!this.rootNode,
+                nodeSize: this.rootNode ? this.rootNode.size : 'N/A',
+                positionCount: positions ? positions.count : 0
+            });
         }
         
-        // 空间划分优化
-        const divisionSize = nodes.length > 2000 ? 2 : 4; // 少分割，减少开销
-        const groups = this.groupNodesByRegion(nodes, divisionSize);
+        // 创建节点索引映射表 - 用于快速查找点在几何体中的索引
+        const positionToIndexMap = new Map();
         
-        for (const [regionKey, nodeGroup] of Object.entries(groups)) {
-            // 计算该组节点的边界球
-            const boundingSphere = this.calculateBoundingSphere(nodeGroup);
+        // 构建精确度更高的映射方式，但更简化
+        for (let i = 0; i < positions.count; i++) {
+            const idx = i * 3;
+            const x = positions.array[idx];
+            const y = positions.array[idx+1];
+            const z = positions.array[idx+2];
             
-            // 检查边界球是否在视锥体内
-            if (frustum.intersectsSphere(boundingSphere)) {
-                // 如果在，添加所有节点索引
-                for (const node of nodeGroup) {
-                    const index = nodeIndexMap.get(node);
-                    if (index !== undefined && index < count) {
-                        this.visibleNodes[level].add(index);
+            // 跳过被"隐藏"的点
+            if (Math.abs(x) > 1e9) continue;
+            
+            // 只使用一种精度匹配，减少Map大小
+            const key = `${Math.round(x)},${Math.round(y)},${Math.round(z)}`;
+            positionToIndexMap.set(key, i);
+        }
+        
+        // 定义递归剔除函数，从根节点开始
+        const cullOctreeNode = (node, depth = 0) => {
+            if (!node) return;
+            nodesTested++;
+            
+            // 计算节点边界球
+            const centerX = node.x + node.size / 2;
+            const centerY = node.y + node.size / 2;
+            const centerZ = node.z + node.size / 2;
+            const radius = node.size * Math.sqrt(3) / 2; // 保守估计
+            
+            const boundingSphere = new THREE.Sphere(
+                new THREE.Vector3(centerX, centerY, centerZ),
+                radius
+            );
+            
+            // 检查节点是否在视锥内
+            if (!frustum.intersectsSphere(boundingSphere)) {
+                // 如果不在视锥内，整个子树都不可见
+                return;
+            }
+            
+            nodesInFrustum++;
+            
+            // 添加该节点的中心点 - 简化匹配逻辑
+            const key = `${Math.round(centerX)},${Math.round(centerY)},${Math.round(centerZ)}`;
+            const index = positionToIndexMap.get(key);
+            
+            if (index !== undefined) {
+                visibleIndices.add(index);
+                pointsMatched++;
+            }
+            
+            // 如果是叶子节点，检查所有点
+            if (node.is_leaf || node.isLeaf) {
+                pointsFound++;
+                
+                // 如果节点有存储的点数据，也检查这些点
+                if (node.points && node.points.length > 0) {
+                    for (const point of node.points) {
+                        if (!point || point.length < 3) continue;
+                        
+                        const px = point[0];
+                        const py = point[1];
+                        const pz = point[2];
+                        
+                        // 简化匹配逻辑
+                        const pointKey = `${Math.round(px)},${Math.round(py)},${Math.round(pz)}`;
+                        const pointIndex = positionToIndexMap.get(pointKey);
+                        
+                        if (pointIndex !== undefined) {
+                            visibleIndices.add(pointIndex);
+                            pointsMatched++;
+                        }
+                    }
+                }
+            } else {
+                // 非叶子节点 - 递归处理子节点
+                for (let i = 0; i < 8; i++) {
+                    if (node.children[i]) {
+                        cullOctreeNode(node.children[i], depth + 1);
                     }
                 }
             }
+        };
+        
+        // 从根节点开始剔除
+        cullOctreeNode(this.rootNode);
+        
+        // 将结果保存到可见节点集合中
+        this.visibleNodes[level] = visibleIndices;
+        
+        // 打印详细的调试信息，但降低频率
+        if (this._cullStatsCounter % 30 === 0) {
+            console.log(`八叉树剔除统计 - 级别 ${level}:`, {
+                总节点数: nodesTested,
+                视锥内节点数: nodesInFrustum,
+                找到的叶子节点: pointsFound,
+                匹配的点数: pointsMatched,
+                最终可见点数: visibleIndices.size
+            });
         }
+        this._cullStatsCounter++;
     }
     
-    // 计算一组节点的边界球
-    calculateBoundingSphere(nodes) {
-        if (nodes.length === 0) {
-            return new THREE.Sphere(new THREE.Vector3(), 0);
-        }
-        
-        // 找出中心点
-        let centerX = 0, centerY = 0, centerZ = 0;
-        for (const node of nodes) {
-            centerX += node.position.x;
-            centerY += node.position.y;
-            centerZ += node.position.z;
-        }
-        
-        centerX /= nodes.length;
-        centerY /= nodes.length;
-        centerZ /= nodes.length;
-        
-        // 找出最远距离作为半径
-        let maxDistSq = 0;
-        for (const node of nodes) {
-            const dx = node.position.x - centerX;
-            const dy = node.position.y - centerY;
-            const dz = node.position.z - centerZ;
-            const distSq = dx*dx + dy*dy + dz*dz;
-            maxDistSq = Math.max(maxDistSq, distSq);
-        }
-        
-        return new THREE.Sphere(
-            new THREE.Vector3(centerX, centerY, centerZ),
-            Math.sqrt(maxDistSq)
-        );
-    }
-
-    // 使用分块方式进行剔除 - 适用于中等数量的点
-    performBlockCulling(level, frustum, positions, camera) {
-        const blockSize = 200; // 每个区块的点数
-        const posArray = positions.array;
-        const count = positions.count;
-        
-        // 计算整个点云的边界框
-        const sceneCenter = new THREE.Vector3(
-            (this.bounds.min.x + this.bounds.max.x) / 2,
-            (this.bounds.min.y + this.bounds.max.y) / 2,
-            (this.bounds.min.z + this.bounds.max.z) / 2
-        );
-        
-        // 安全获取相机位置
-        let distanceToCenter = 0;
-        try {
-            // 尝试获取当前函数作用域的相机
-            const currentCamera = camera || window.camera;
-            if (currentCamera && currentCamera.position) {
-                const cameraPosition = new THREE.Vector3().copy(currentCamera.position);
-                distanceToCenter = cameraPosition.distanceTo(sceneCenter);
-            } else {
-                // 如果无法获取相机，使用默认逻辑
-                distanceToCenter = this.getBoundingSphereRadius() * 2;
-            }
-        } catch (e) {
-            console.warn("无法获取相机位置，使用默认剔除逻辑");
-            distanceToCenter = this.getBoundingSphereRadius() * 2;
-        }
-        
-        // 如果相机离模型太远，可能大部分点都会被剔除，应用细粒度剔除
-        if (distanceToCenter > this.getBoundingSphereRadius() * 3) {
-            // 每个区块大小需要更大，以减少计算量
-            for (let blockStart = 0; blockStart < count; blockStart += blockSize) {
-                this.processCullingBlock(level, frustum, posArray, blockStart, 
-                    Math.min(blockStart + blockSize, count), camera);
-            }
-        } else {
-            // 处理所有点为一个大区块，提高性能
-            this.processCullingBlock(level, frustum, posArray, 0, count, camera);
-        }
-    }
-    
-    // 处理一个点分块的剔除
-    processCullingBlock(level, frustum, posArray, blockStart, blockEnd, camera) {
-        // 计算区块的边界盒
-        let minX = Infinity, minY = Infinity, minZ = Infinity;
-        let maxX = -Infinity, maxY = -Infinity, maxZ = -Infinity;
-        
-        // 首先找出这个区块的边界
-        for (let i = blockStart; i < blockEnd; i++) {
-            const idx = i * 3;
-            const x = posArray[idx];
-            const y = posArray[idx + 1];
-            const z = posArray[idx + 2];
-            
-            // 跳过之前被"隐藏"的点
-            if (Math.abs(x) > 1e9) continue;
-            
-            minX = Math.min(minX, x);
-            minY = Math.min(minY, y);
-            minZ = Math.min(minZ, z);
-            maxX = Math.max(maxX, x);
-            maxY = Math.max(maxY, y);
-            maxZ = Math.max(maxZ, z);
-        }
-        
-        // 如果区块为空，跳过
-        if (minX === Infinity) return;
-        
-        // 计算边界球中心
-        const centerX = (minX + maxX) / 2;
-        const centerY = (minY + maxY) / 2;
-        const centerZ = (minZ + maxZ) / 2;
-        
-        // 计算半径 - 使用边界盒对角线的一半
-        const radius = Math.sqrt(
-            Math.pow(maxX - minX, 2) +
-            Math.pow(maxY - minY, 2) +
-            Math.pow(maxZ - minZ, 2)
-        ) / 2;
-        
-        const boundingSphere = new THREE.Sphere(
-            new THREE.Vector3(centerX, centerY, centerZ),
-            radius
-        );
-        
-        // 检查边界球是否在视锥体内
-        if (frustum.intersectsSphere(boundingSphere)) {
-            // 添加区块中的所有点
-            for (let i = blockStart; i < blockEnd; i++) {
-                this.visibleNodes[level].add(i);
-            }
-        }
-    }
-    
-    // 简化的视锥剔除方法，用于大量点
+    // 简化的视锥剔除方法，用于大量点 - 作为备选方案
     performSimplifiedCulling(level, frustum, positions) {
         const posArray = positions.array;
         const count = positions.count;
+        let pointsAdded = 0;
         
         // 计算整个点云的边界球 - 使用实际计算的中心点
         const bounds = this.actualBounds || this.bounds;
@@ -1040,109 +967,72 @@ class DMOctreeLoader {
             // 如果整个模型在视锥内，考虑所有点可见
             for (let i = 0; i < count; i++) {
                 this.visibleNodes[level].add(i);
+                pointsAdded++;
             }
             return;
         }
         
-        // 如果模型很大，采用更粗粒度的剔除方式，将模型分成8个象限
-        const octants = this.divideIntoOctants(posArray, count);
+        // 创建更简单的网格进行剔除 - 只用2×2×2的网格提高性能
+        const gridSize = 2;
+        const cellSizeX = (bounds.max.x - bounds.min.x) / gridSize;
+        const cellSizeY = (bounds.max.y - bounds.min.y) / gridSize;
+        const cellSizeZ = (bounds.max.z - bounds.min.z) / gridSize;
         
-        for (let octantIndex = 0; octantIndex < octants.length; octantIndex++) {
-            const octant = octants[octantIndex];
-            if (octant.count === 0) continue;
-            
-            const octantSphere = new THREE.Sphere(
-                new THREE.Vector3(octant.center.x, octant.center.y, octant.center.z),
-                octant.radius
-            );
-            
-            if (frustum.intersectsSphere(octantSphere)) {
-                // 将这个象限的所有点标记为可见
-                for (let i = 0; i < octant.indices.length; i++) {
-                    this.visibleNodes[level].add(octant.indices[i]);
+        // 预计算网格单元
+        const gridCells = [];
+        for (let ix = 0; ix < gridSize; ix++) {
+            for (let iy = 0; iy < gridSize; iy++) {
+                for (let iz = 0; iz < gridSize; iz++) {
+                    const cellCenterX = bounds.min.x + (ix + 0.5) * cellSizeX;
+                    const cellCenterY = bounds.min.y + (iy + 0.5) * cellSizeY;
+                    const cellCenterZ = bounds.min.z + (iz + 0.5) * cellSizeZ;
+                    
+                    const cellRadius = Math.sqrt(cellSizeX*cellSizeX + cellSizeY*cellSizeY + cellSizeZ*cellSizeZ) / 2;
+                    
+                    const cellSphere = new THREE.Sphere(
+                        new THREE.Vector3(cellCenterX, cellCenterY, cellCenterZ),
+                        cellRadius
+                    );
+                    
+                    gridCells.push({
+                        x: ix, y: iy, z: iz,
+                        sphere: cellSphere,
+                        visible: frustum.intersectsSphere(cellSphere)
+                    });
                 }
             }
         }
-    }
-    
-    // 将点云分成8个象限，用于高效剔除
-    divideIntoOctants(posArray, count) {
-        const octants = [];
-        for (let i = 0; i < 8; i++) {
-            octants.push({
-                indices: [],
-                center: {x: 0, y: 0, z: 0},
-                count: 0,
-                radius: 0
-            });
-        }
         
-        // 使用实际数据中心，而不是可能不准确的边界框中心
-        const bounds = this.actualBounds || this.bounds;
-        const centerX = (bounds.min.x + bounds.max.x) / 2;
-        const centerY = (bounds.min.y + bounds.max.y) / 2;
-        const centerZ = (bounds.min.z + bounds.max.z) / 2;
-        
-        // 第一遍：收集每个象限的点
+        // 直接处理每个点 - 更高效的批处理
         for (let i = 0; i < count; i++) {
             const idx = i * 3;
             const x = posArray[idx];
             const y = posArray[idx + 1];
             const z = posArray[idx + 2];
             
-            // 跳过之前被"隐藏"的点
+            // 跳过被"隐藏"的点
             if (Math.abs(x) > 1e9) continue;
             
-            // 确定点属于哪个象限
-            const octantIndex = (x > centerX ? 1 : 0) +
-                               (y > centerY ? 2 : 0) +
-                               (z > centerZ ? 4 : 0);
+            // 计算点所在的单元格索引
+            const ix = Math.floor((x - bounds.min.x) / cellSizeX);
+            const iy = Math.floor((y - bounds.min.y) / cellSizeY);
+            const iz = Math.floor((z - bounds.min.z) / cellSizeZ);
             
-            octants[octantIndex].indices.push(i);
-            octants[octantIndex].count++;
-        }
-        
-        // 第二遍：计算每个象限的中心和半径
-        for (let i = 0; i < 8; i++) {
-            const octant = octants[i];
-            if (octant.count === 0) continue;
-            
-            let sumX = 0, sumY = 0, sumZ = 0;
-            let minX = Infinity, minY = Infinity, minZ = Infinity;
-            let maxX = -Infinity, maxY = -Infinity, maxZ = -Infinity;
-            
-            for (const pointIndex of octant.indices) {
-                const idx = pointIndex * 3;
-                const x = posArray[idx];
-                const y = posArray[idx + 1];
-                const z = posArray[idx + 2];
-                
-                sumX += x;
-                sumY += y;
-                sumZ += z;
-                
-                minX = Math.min(minX, x);
-                minY = Math.min(minY, y);
-                minZ = Math.min(minZ, z);
-                maxX = Math.max(maxX, x);
-                maxY = Math.max(maxY, y);
-                maxZ = Math.max(maxZ, z);
+            // 边界检查
+            if (ix < 0 || ix >= gridSize || iy < 0 || iy >= gridSize || iz < 0 || iz >= gridSize) {
+                continue;
             }
             
-            // 计算平均中心点
-            octant.center.x = sumX / octant.count;
-            octant.center.y = sumY / octant.count;
-            octant.center.z = sumZ / octant.count;
+            // 查找对应的网格单元
+            const cellIndex = ix + iy * gridSize + iz * gridSize * gridSize;
+            const cell = gridCells[cellIndex];
             
-            // 计算最大半径
-            octant.radius = Math.sqrt(
-                Math.pow(maxX - minX, 2) +
-                Math.pow(maxY - minY, 2) +
-                Math.pow(maxZ - minZ, 2)
-            ) / 2;
+            // 如果单元格可见，则点可见
+            if (cell && cell.visible) {
+                this.visibleNodes[level].add(i);
+                pointsAdded++;
+            }
         }
-        
-        return octants;
     }
     
     // 获取边界球半径
@@ -1169,84 +1059,201 @@ class DMOctreeLoader {
         const visibleIndices = this.visibleNodes[currentLevel];
         if (!visibleIndices) return;
         
+        // 如果几乎所有点都可见，恢复所有点
         const geometry = mesh.geometry;
-        const positions = geometry.attributes.position;
+        const isFullyVisible = visibleIndices.size > geometry.attributes.position.count * 0.9;
         
-        // 缓存原始位置，避免重复计算
-        if (!this._originalPositions) {
-            this._originalPositions = {};
-        }
-        
-        // 如果几乎所有点都可见，跳过剔除以提高性能
-        if (visibleIndices.size > positions.count * 0.9) {
-            // 恢复所有点的位置
-            if (this._originalPositions[currentLevel]) {
-                this.resetPositions(currentLevel, positions);
-            }
-            return;
-        }
-        
-        // 为当前LOD级别保存原始位置
-        if (!this._originalPositions[currentLevel]) {
-            this._originalPositions[currentLevel] = new Float32Array(positions.array);
-        }
-        
-        const posArray = positions.array;
-        const originalPos = this._originalPositions[currentLevel];
-        
-        // 如果可见点数量很少，使用优化的剔除方法
-        if (visibleIndices.size < positions.count * 0.1) {
-            // 先隐藏所有点
-            for (let i = 0; i < positions.count; i++) {
-                const idx = i * 3;
-                posArray[idx] = 1e10;
-                posArray[idx+1] = 1e10;
-                posArray[idx+2] = 1e10;
+        if (this.useIndexBuffer) {
+            // === 使用索引缓冲区实现视锥剔除 ===
+            
+            // 初始化原始索引
+            if (!geometry._originalIndices) {
+                const indices = [];
+                for (let i = 0; i < geometry.attributes.position.count; i++) {
+                    indices.push(i);
+                }
+                geometry._originalIndices = [...indices];
+                
+                if (!geometry.index) {
+                    geometry.setIndex(indices);
+                }
             }
             
-            // 只恢复可见点
-            for (const i of visibleIndices) {
-                const idx = i * 3;
-                posArray[idx] = originalPos[idx];
-                posArray[idx+1] = originalPos[idx+1];
-                posArray[idx+2] = originalPos[idx+2];
+            if (isFullyVisible) {
+                // 恢复所有点
+                if (geometry.index.count !== geometry._originalIndices.length) {
+                    geometry.setIndex([...geometry._originalIndices]);
+                    geometry.index.needsUpdate = true;
+                }
+            } else {
+                // 更新索引缓冲区
+                const newIndices = Array.from(visibleIndices).sort((a, b) => a - b);
+                
+                // 只有在索引实际变化时才更新
+                if (newIndices.length !== geometry.index.count || 
+                    this._lastUpdateFrame !== performance.now()) {
+                    geometry.setIndex(newIndices);
+                    geometry.index.needsUpdate = true;
+                    this._lastUpdateFrame = performance.now();
+                }
             }
         } else {
-            // 如果可见点数量较多，只隐藏不可见点
-            for (let i = 0; i < positions.count; i++) {
-                const idx = i * 3;
-                if (visibleIndices.has(i)) {
-                    // 恢复可见点的原始位置
+            // === 使用位置修改实现视锥剔除 ===
+            
+            // 缓存原始位置
+            if (!this._originalPositions) {
+                this._originalPositions = {};
+            }
+            
+            if (!this._originalPositions[currentLevel]) {
+                this._originalPositions[currentLevel] = new Float32Array(geometry.attributes.position.array);
+            }
+            
+            const posArray = geometry.attributes.position.array;
+            const originalPos = this._originalPositions[currentLevel];
+            
+            if (isFullyVisible) {
+                // 恢复所有点的位置
+                for (let i = 0; i < geometry.attributes.position.count; i++) {
+                    const idx = i * 3;
                     posArray[idx] = originalPos[idx];
                     posArray[idx+1] = originalPos[idx+1];
                     posArray[idx+2] = originalPos[idx+2];
-                } else {
-                    // 隐藏不可见点
-                    posArray[idx] = 1e10;
-                    posArray[idx+1] = 1e10;
-                    posArray[idx+2] = 1e10;
+                }
+            } else {
+                // 隐藏不可见点
+                for (let i = 0; i < geometry.attributes.position.count; i++) {
+                    const idx = i * 3;
+                    if (visibleIndices.has(i)) {
+                        // 恢复可见点
+                        posArray[idx] = originalPos[idx];
+                        posArray[idx+1] = originalPos[idx+1];
+                        posArray[idx+2] = originalPos[idx+2];
+                    } else {
+                        // 将不可见点移到远处
+                        posArray[idx] = 1e10;
+                        posArray[idx+1] = 1e10;
+                        posArray[idx+2] = 1e10;
+                    }
                 }
             }
+            
+            // 标记需要更新
+            geometry.attributes.position.needsUpdate = true;
         }
-        
-        // 更新几何体
-        positions.needsUpdate = true;
     }
     
-    // 重置点位置到原始状态
-    resetPositions(level, positions) {
-        if (!this._originalPositions || !this._originalPositions[level]) return;
+    // 性能更佳的视锥剔除方法
+    performFrustumCulling(camera) {
+        if (!this.frustumCullingEnabled) return;
         
-        const posArray = positions.array;
-        const originalPos = this._originalPositions[level];
+        // 仅处理当前LOD级别，减少不必要的计算
+        const currentLevel = this._lastLODLevel !== undefined ? this._lastLODLevel : 0;
+        if (!this.lodMeshes[currentLevel]) return;
         
-        for (let i = 0; i < Math.min(posArray.length, originalPos.length); i++) {
-            posArray[i] = originalPos[i];
+        // 降低剔除频率 - 记录当前时间
+        const now = performance.now();
+        if (this._lastCullingTime && (now - this._lastCullingTime < 100)) { // 100ms剔除间隔
+            // 检查相机是否移动了足够多
+            const cameraPosition = camera.position.clone();
+            const cameraDirection = new THREE.Vector3(0, 0, -1).applyQuaternion(camera.quaternion);
+            
+            if (this._lastCameraPosition && this._lastCameraDirection) {
+                const positionChange = cameraPosition.distanceTo(this._lastCameraPosition);
+                const directionChange = 1 - cameraDirection.dot(this._lastCameraDirection);
+                
+                // 如果移动不够多，跳过此次剔除
+                if (positionChange < 1.0 && directionChange < 0.1) {
+                    return;
+                }
+            }
+            
+            // 更新相机位置和方向记录
+            this._lastCameraPosition = cameraPosition;
+            this._lastCameraDirection = cameraDirection;
         }
         
-        positions.needsUpdate = true;
-    }
+        this._lastCullingTime = now;
 
+        // 创建视锥对象
+        const frustum = new THREE.Frustum();
+        const projScreenMatrix = new THREE.Matrix4();
+        
+        // 计算视锥体
+        projScreenMatrix.multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse);
+        frustum.setFromProjectionMatrix(projScreenMatrix);
+        
+        // 清除当前LOD级别的可见节点记录
+        this.visibleNodes = {};
+        this.visibleNodes[currentLevel] = new Set();
+        
+        // 获取当前LOD网格
+        const mesh = this.lodMeshes[currentLevel];
+        const geometry = mesh.geometry;
+        const positions = geometry.attributes.position;
+        const count = positions.count;
+        
+        // 标记尝试使用的剔除策略
+        let cullingStrategy = 'none';
+        let visiblePointsCount = 0;
+        
+        try {
+            // 如果我们有原始的八叉树节点 - 使用层次化剔除
+            if (this.rootNode) {
+                cullingStrategy = 'octree';
+                this.performOctreeBasedCulling(currentLevel, frustum);
+                visiblePointsCount = this.visibleNodes[currentLevel].size;
+                
+                // 如果八叉树剔除没有找到任何可见点，回退到简化剔除
+                if (visiblePointsCount === 0) {
+                    cullingStrategy = 'simplified-fallback';
+                    this.performSimplifiedCulling(currentLevel, frustum, positions);
+                    visiblePointsCount = this.visibleNodes[currentLevel].size;
+                }
+            } else if (count <= 5000) {
+                // 点数量少，进行精确剔除
+                cullingStrategy = 'precise';
+                this.performPreciseCulling(currentLevel, frustum);
+                visiblePointsCount = this.visibleNodes[currentLevel].size;
+            } else if (count <= 50000) {
+                // 点数量中等，使用改进的分块剔除
+                cullingStrategy = 'block';
+                this.performBlockCulling(currentLevel, frustum, positions, camera);
+                visiblePointsCount = this.visibleNodes[currentLevel].size;
+            } else {
+                // 点数量大，使用高效剔除
+                cullingStrategy = 'simplified';
+                this.performSimplifiedCulling(currentLevel, frustum, positions);
+                visiblePointsCount = this.visibleNodes[currentLevel].size;
+            }
+            
+            // 如果所有剔除策略都失败，显示所有点
+            if (visiblePointsCount === 0) {
+                cullingStrategy = 'all-visible';
+                for (let i = 0; i < count; i++) {
+                    this.visibleNodes[currentLevel].add(i);
+                }
+                visiblePointsCount = count;
+            }
+        } catch (error) {
+            console.error("视锥剔除过程出错，显示所有点:", error);
+            cullingStrategy = 'error-fallback';
+            // 错误发生时，显示所有点
+            for (let i = 0; i < count; i++) {
+                this.visibleNodes[currentLevel].add(i);
+            }
+            visiblePointsCount = count;
+        }
+        
+        // 降低日志输出频率
+        if (!this._cullStatsCounter) this._cullStatsCounter = 0;
+        this._cullStatsCounter++;
+        
+        if (this._cullStatsCounter % 30 === 0) {
+            console.log(`视锥剔除 [${cullingStrategy}] - 可见点数: ${visiblePointsCount}/${count} (${((visiblePointsCount/count)*100).toFixed(1)}%)`);
+        }
+    }
+    
     // 更新LOD显示，包含视锥剔除
     updateLOD(camera, scene, boundingRadius) {
         if (!this.lodMeshes || this.lodMeshes.length === 0) return;

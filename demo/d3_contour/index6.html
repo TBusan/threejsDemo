@@ -67,7 +67,7 @@
 			import * as THREE from "three";
 			import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 			import Stats from "three/addons/libs/stats.module.js";
-			import { contourData } from "./contourData.js";
+			import { contourData } from "./contourData2.js";
 			import { contours as ztContours, contourDensity } from "./d3_zoutao.js";
 			// ===== D3.js 部分：生成等值线数据 =====
 			// 配置参数
@@ -100,9 +100,9 @@
 					for (let x = 0; x < gridSizeX; x++) {
 						const value = dataValues[y][x];
 
-						// null值处理：将null值替换为undefined，让D3自动跳过这些区域
-						if (value === null) {
-							gridData[y * gridSizeX + x] = undefined;
+						// null值处理：将null值替换为NaN，让D3正确跳过这些区域
+						if (value === null || value === undefined) {
+							gridData[y * gridSizeX + x] = NaN;
 						} else {
 							gridData[y * gridSizeX + x] = value;
 						}
@@ -152,26 +152,34 @@
 			const thresholds = [];
 
 			// 添加特定阈值
-			// const specificThresholds = [-100,-50, 0, 50,100,150, 200,250, 300,350, 400,450, 500,550,600,650,700,750,800,850,900, 980];
-			const specificThresholds = [
-				-100, 1.85, 64.44, 127.04, 189.63, 252.23, 314.83, 377.42, 440.02,
-				502.61, 565.21, 627.8, 690.4, 752.99, 815.59, 878.18, 940.78,
-			];
+			const specificThresholds = [-100,-50, 0, 50,100,150, 200,250, 300,350, 400,450, 500,550,600,650,700,750,800,850,900, 980];
+			// const specificThresholds = [
+			// 	-100, 1.85, 64.44, 127.04, 189.63, 252.23, 314.83, 377.42, 440.02,
+			// 	502.61, 565.21, 627.8, 690.4, 752.99, 815.59, 878.18, 940.78,
+			// ];
 			// 使用d3.contours()从处理后的网格数据生成等值线
 			const contourGenerator = ztContours()
 				.size([gridSizeX, gridSizeY])
 				.thresholds(specificThresholds)
-				.smooth(true) // 启用平滑处理  //'linearDual'  'bilinear'
-	
-			// const contourGenerator = ztContours()
-			// 	.size([gridSizeX, gridSizeY])
-			// 	.thresholds(specificThresholds)
-			// 	.smooth("spline")       // 使用样条平滑  spline
-			// 	.smoothTension(0.5)     // 控制平滑程度
-			// 	// .connectGaps(true);     // 填充缺失值
-
-			// 计算等值线
-			let contours = contourGenerator(processedGridData);
+				.smooth(true); // 启用平滑处理  //'linearDual'  'bilinear'
+				
+			// 预处理数据，确保NaN值被正确处理
+			function handleNullInGrid(gridData) {
+				// 创建一个副本，避免修改原始数据
+				const processedData = [...gridData];
+				
+				// 确保所有NaN和null值被正确替换为D3能理解的值
+				for (let i = 0; i < processedData.length; i++) {
+					if (processedData[i] === null || isNaN(processedData[i])) {
+						processedData[i] = NaN; // D3 contour generator会跳过NaN值
+					}
+				}
+				
+				return processedData;
+			}
+			
+			// 计算等值线 - 使用预处理的数据
+			let contours = contourGenerator(handleNullInGrid(processedGridData));
 
 			console.log("==contours==", contours);
 
@@ -191,52 +199,52 @@
 				//     [maxVal, "rgba(66,114,245,255)"]             // 蓝色
 				// ];
 
-				// const localOriginColor1 = [
-				// 	[-100, "rgba(126,84,255,255)"],
-				// 	[-50, "rgba(99,66,255,255)"],
-				// 	[0, "rgba(72,48,255,255)"],
-				// 	[50, "rgba(45,30,255,255)"],
-				// 	[100, "rgba(18,12,255,255)"],
-				// 	[150, "rgba(0,15,240,255)"],
-				// 	[200, "rgba(0,60,195,255)"],
-				// 	[250, "rgba(0,105,150,255)"],
-				// 	[300, "rgba(0,150,105,255)"],
-				// 	[350, "rgba(0,195,60,255)"],
-				// 	[400, "rgba(0,240,15,255)"],
-				// 	[450, "rgba(30,255,0,255)"],
-				// 	[500, "rgba(75,255,0,255)"],
-				// 	[550, "rgba(120,255,0,255)"],
-				// 	[600, "rgba(165,255,0,255)"],
-				// 	[650, "rgba(210,255,0,255)"],
-				// 	[700, "rgba(255,255,0,255)"],
-				// 	[750, "rgba(255,228,0,255)"],
-				// 	[800, "rgba(255,201,0,255)"],
-				// 	[850, "rgba(255,174,0,255)"],
-				// 	[900, "rgba(255,147,0,255)"],
-				// 	[950, "rgba(255,120,0,255)"],
-				// 	[1000, "rgba(255,96,0,255)"],
-				// ];
-
 				const localOriginColor = [
-					// [-100, "rgba(126,84,255,255)"],
 					[-100, "rgba(126,84,255,255)"],
-					[1.85, "#7D2030"],
-					[64.44, "rgba(99,66,255,255)"],
-					[127.04, "rgba(72,48,255,255)"],
-					[189.63, "rgba(45,30,255,255)"],
-					[252.23, "rgba(18,12,255,255)"],
-					[314.83, "rgba(0,15,240,255)"],
-					[377.42, "rgba(0,60,195,255)"],
-					[440.02, "rgba(0,105,150,255)"],
-					[502.61, "rgba(0,150,105,255)"],
-					[565.21, "rgba(0,195,60,255)"],
-					[627.8, "rgba(0,240,15,255)"],
-					[690.4, "rgba(30,255,0,255)"],
-					[752.99, "rgba(75,255,0,255)"],
-					[815.59, "rgba(120,255,0,255)"],
-					[878.18, "rgba(165,255,0,255)"],
-					[940.78, "rgba(210,255,0,255)"],
+					[-50, "rgba(99,66,255,255)"],
+					[0, "rgba(72,48,255,255)"],
+					[50, "rgba(45,30,255,255)"],
+					[100, "rgba(18,12,255,255)"],
+					[150, "rgba(0,15,240,255)"],
+					[200, "rgba(0,60,195,255)"],
+					[250, "rgba(0,105,150,255)"],
+					[300, "rgba(0,150,105,255)"],
+					[350, "rgba(0,195,60,255)"],
+					[400, "rgba(0,240,15,255)"],
+					[450, "rgba(30,255,0,255)"],
+					[500, "rgba(75,255,0,255)"],
+					[550, "rgba(120,255,0,255)"],
+					[600, "rgba(165,255,0,255)"],
+					[650, "rgba(210,255,0,255)"],
+					[700, "rgba(255,255,0,255)"],
+					[750, "rgba(255,228,0,255)"],
+					[800, "rgba(255,201,0,255)"],
+					[850, "rgba(255,174,0,255)"],
+					[900, "rgba(255,147,0,255)"],
+					[950, "rgba(255,120,0,255)"],
+					[1000, "rgba(255,96,0,255)"],
 				];
+
+				// const localOriginColor = [
+				// 	// [-100, "rgba(126,84,255,255)"],
+				// 	[-100, "rgba(126,84,255,255)"],
+				// 	[1.85, "#7D2030"],
+				// 	[64.44, "rgba(99,66,255,255)"],
+				// 	[127.04, "rgba(72,48,255,255)"],
+				// 	[189.63, "rgba(45,30,255,255)"],
+				// 	[252.23, "rgba(18,12,255,255)"],
+				// 	[314.83, "rgba(0,15,240,255)"],
+				// 	[377.42, "rgba(0,60,195,255)"],
+				// 	[440.02, "rgba(0,105,150,255)"],
+				// 	[502.61, "rgba(0,150,105,255)"],
+				// 	[565.21, "rgba(0,195,60,255)"],
+				// 	[627.8, "rgba(0,240,15,255)"],
+				// 	[690.4, "rgba(30,255,0,255)"],
+				// 	[752.99, "rgba(75,255,0,255)"],
+				// 	[815.59, "rgba(120,255,0,255)"],
+				// 	[878.18, "rgba(165,255,0,255)"],
+				// 	[940.78, "rgba(210,255,0,255)"],
+				// ];
 
 				const localOriginColorLen = localOriginColor.length;
 				const localOriginColorMin = localOriginColor[0][0];
@@ -376,18 +384,32 @@
 
 					// 创建等值线的形状
 					for (const polygon of contour.coordinates) {
+						// 检查多边形是否有足够的点形成一个有效的形状
+						if (!polygon || !polygon[0] || polygon[0].length < 3) {
+							continue; // 跳过无效的多边形
+						}
+
 						const shape = new THREE.Shape();
 
 						// 遍历轮廓线的点，转换到Three.js坐标系
 						for (let j = 0; j < polygon[0].length; j++) {
-							const [x, y] = polygon[0][j];
+							const point = polygon[0][j];
+							
+							// 检查点是否存在
+							if (!point || point.length < 2) {
+								continue;
+							}
+							
+							const [x, y] = point;
+
+							// 检查坐标值是否有效
+							if (x === undefined || y === undefined || isNaN(x) || isNaN(y)) {
+								continue; // 跳过无效坐标
+							}
 
 							// 转换D3网格坐标到数据坐标
-							const dataXPos = x; // xMin + (x / (gridSizeX - 1)) * (xMax - xMin);
-							const dataYPos = y; //  yMin + (y / (gridSizeY - 1)) * (yMax - yMin);
-
-							// const dataXPos = xMin + (x / (gridSizeX - 1)) * (xMax - xMin);
-							// const dataYPos = yMin + (y / (gridSizeY - 1)) * (yMax - yMin);
+							const dataXPos = xMin + (x / (gridSizeX - 1)) * (xMax - xMin);
+							const dataYPos = yMin + (y / (gridSizeY - 1)) * (yMax - yMin);
 
 							// 使用比例尺将数据坐标转换到场景坐标
 							const sceneX = xScale(dataXPos);
@@ -405,17 +427,31 @@
 
 						// 处理内部孔洞
 						for (let j = 1; j < polygon.length; j++) {
+							// 检查孔洞是否有足够的点
+							if (!polygon[j] || polygon[j].length < 3) {
+								continue; // 跳过无效的孔洞
+							}
+
 							const hole = new THREE.Path();
 
 							for (let k = 0; k < polygon[j].length; k++) {
-								const [x, y] = polygon[j][k];
+								const point = polygon[j][k];
+								
+								// 检查点是否存在
+								if (!point || point.length < 2) {
+									continue;
+								}
+								
+								const [x, y] = point;
+
+								// 检查坐标值是否有效
+								if (x === undefined || y === undefined || isNaN(x) || isNaN(y)) {
+									continue; // 跳过无效坐标
+								}
 
 								// 转换D3网格坐标到数据坐标
-								const dataXPos = x; // xMin + (x / (gridSizeX - 1)) * (xMax - xMin);
-								const dataYPos = y; // yMin + (y / (gridSizeY - 1)) * (yMax - yMin);
-
-								// const dataXPos = xMin + (x / (gridSizeX - 1)) * (xMax - xMin);
-								// const dataYPos = yMin + (y / (gridSizeY - 1)) * (yMax - yMin);
+								const dataXPos = xMin + (x / (gridSizeX - 1)) * (xMax - xMin);
+								const dataYPos = yMin + (y / (gridSizeY - 1)) * (yMax - yMin);
 
 								// 使用比例尺将数据坐标转换到场景坐标
 								const sceneX = xScale(dataXPos);
@@ -431,8 +467,20 @@
 							shape.holes.push(hole);
 						}
 
-						// 创建几何体，增加细分以获得更平滑的形状
-						const geometry = new THREE.ShapeGeometry(shape, 32);
+						// 尝试创建几何体，如果形状无效则跳过
+						let geometry;
+						try {
+							geometry = new THREE.ShapeGeometry(shape, 32);
+							
+							// 检查几何体是否有效
+							if (geometry.attributes.position.count === 0) {
+								geometry.dispose();
+								continue; // 跳过空几何体
+							}
+						} catch (e) {
+							console.warn("创建几何体失败:", e);
+							continue; // 跳过失败的几何体
+						}
 
 						// 获取当前等值线的颜色
 						const colorStr = getTerrainColor(contour.value);
@@ -458,7 +506,7 @@
 								contour.value
 							);
 
-							// 创建线条几何体
+							// 创建线条几何体，使用相同的形状确保与面完全匹配
 							const lineGeometry = new THREE.EdgesGeometry(geometry);
 							const lineMaterial = getMaterial(
 								isSpecificValue ? 0xffffff : 0x888888,
