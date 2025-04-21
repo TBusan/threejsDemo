@@ -486,6 +486,44 @@
 			const directionalLight = new THREE.DirectionalLight(0xffffff, 0.8);
 			directionalLight.position.set(1, 1, 1);
 			scene.add(directionalLight);
+			
+			// 添加坐标轴辅助对象
+			const axesSize = Math.max(sceneWidth, sceneHeight) * 0.5; // 坐标轴尺寸
+			const axesHelper = new THREE.AxesHelper(axesSize);
+			// 设置轴线颜色 - x轴红色，y轴绿色，z轴蓝色
+			axesHelper.setColors(
+				new THREE.Color(0xff0000), // X轴 - 红色
+				new THREE.Color(0x00ff00), // Y轴 - 绿色
+				new THREE.Color(0x0000ff)  // Z轴 - 蓝色
+			);
+			scene.add(axesHelper);
+			
+			// 添加网格辅助对象以更好地展示水平面
+			const gridHelper = new THREE.GridHelper(axesSize * 2, 10, 0x444444, 0x333333);
+			gridHelper.rotation.x = Math.PI / 2; // 旋转到XY平面
+			scene.add(gridHelper);
+			
+			// 添加控制是否显示辅助对象的UI控件
+			const axesCheckbox = document.createElement('input');
+			axesCheckbox.type = 'checkbox';
+			axesCheckbox.id = 'showAxes';
+			axesCheckbox.checked = true;
+			
+			const axesLabel = document.createElement('label');
+			axesLabel.htmlFor = 'showAxes';
+			axesLabel.textContent = '显示坐标轴';
+			
+			const axesDiv = document.createElement('div');
+			axesDiv.appendChild(axesCheckbox);
+			axesDiv.appendChild(axesLabel);
+			
+			document.getElementById('controls').appendChild(axesDiv);
+			
+			// 坐标轴显示控制
+			axesCheckbox.addEventListener('change', (event) => {
+				axesHelper.visible = event.target.checked;
+				gridHelper.visible = event.target.checked;
+			});
 
 			// 初始化
 			createContours();
