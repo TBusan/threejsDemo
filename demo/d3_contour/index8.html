@@ -191,6 +191,18 @@
 			gridHelper.position.set(0, 0, 0);
 			scene.add(gridHelper);
 			
+			// 在原点添加一个100*40的平面
+			const planeGeometry = new THREE.PlaneGeometry(152, 29.874);
+			const planeMaterial = new THREE.MeshBasicMaterial({
+				color: 0xccccff,
+				transparent: true,
+				opacity: 0.3,
+				side: THREE.DoubleSide
+			});
+			const plane = new THREE.Mesh(planeGeometry, planeMaterial);
+			plane.position.set(79, 0, 0);
+			scene.add(plane);
+			
 			// 创建坐标轴刻度和标签
 			function createAxisTicks() {
 				const ticksGroup = new THREE.Group();
