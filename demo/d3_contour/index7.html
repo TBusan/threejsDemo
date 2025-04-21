@@ -36,40 +36,10 @@
 				height: 30px;
 				position: relative;
 			}
-			#app {
-				position: relative;
-			}
-			#map {
-				position: absolute;
-				top: 0;
-				left: 0;
-				width: 900px;
-				height: 900px;
-				z-index: 999;
-			}
-			#compass-container {
-				position: absolute;
-				left: 30px;
-				bottom: 50px;
-				height: 60px;
-				width: 60px;
-			}
 		</style>
 	</head>
 	<body>
 		<div id="info">D3等值线数据 + Three.js渲染</div>
-		<div id="app">
-			<div class="app-title">three-tile v<span id="version"></span> demo</div>
-			<pre id="debug">Debug</pre>
-
-			<div id="map"></div>
-			<div id="compass-container"></div>
-			<div class="statusbar">
-				<div id="attribution"></div>
-				<div id="loading">loading</div>
-				<div id="location">local</div>
-			</div>
-		</div>
 		<div id="controls">
 			<div>
 				<label
@@ -87,9 +57,7 @@
 			{
 				"imports": {
 					"three": "../../build/three.module.js",
-					"three/addons/": "../../examples/jsm/",
-					"three-tile": "../../threetiles/tile.js",
-					"three-tile-plugin": "../../threetiles/plugin.js"
+					"three/addons/": "../../examples/jsm/"
 				}
 			}
 		</script>
@@ -99,12 +67,8 @@
 			import * as THREE from "three";
 			import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 			import Stats from "three/addons/libs/stats.module.js";
-			import { contourData } from "./contourData2.js";
+			import { contourData } from "./contourData.js";
 			import { contours as ztContours, contourDensity } from "./d3_zoutao.js";
-			import * as source from "../../threetiles/mapSource.js";
-			import * as tt from "three-tile";
-			import * as plugin from "three-tile-plugin";
-			// import { createMap, initViewer, fly } from "./map.js";
 			// ===== D3.js 部分：生成等值线数据 =====
 			// 配置参数
 			const width = 800;
@@ -179,7 +143,8 @@
 				.domain([yMin, yMax])
 				.range([sceneHeight / 2, -sceneHeight / 2]); // Y轴翻转，因为Three.js和屏幕坐标Y轴方向相反
 
-			const { x, y, v } = contourData.data;
+
+		    const { x, y, v } = contourData.data;
 			// 生成地形数据
 			const processedGridData = processContourData();
 
@@ -189,10 +154,7 @@
 			const thresholds = [];
 
 			// 添加特定阈值
-			const specificThresholds = [
-				-100, -50, 0, 50, 100, 150, 200, 250, 300, 350, 400, 450, 500, 550, 600,
-				650, 700, 750, 800, 850, 900, 980,
-			];
+			const specificThresholds = [-100,-50, 0, 50,100,150, 200,250, 300,350, 400,450, 500,550,600,650,700,750,800,850,900, 980];
 			// const specificThresholds = [
 			// 	-100, 1.85, 64.44, 127.04, 189.63, 252.23, 314.83, 377.42, 440.02,
 			// 	502.61, 565.21, 627.8, 690.4, 752.99, 815.59, 878.18, 940.78,
@@ -201,29 +163,29 @@
 			const contourGenerator = ztContours()
 				.size([gridSizeX, gridSizeY])
 				.thresholds(specificThresholds)
-
+				// .smooth(true)
 				.x(x)
-				.y(y);
-			// .smooth("spline")
-			// .smooth("spline")
-			// .smoothTension(0.2)
-			//  // 启用平滑处理  //'linearDual'  'bilinear'  	.smooth('linearDual')
-
+				.y(y)
+				.smooth(true)
+				// .smooth("spline")
+				// .smoothTension(0.2)
+				//  // 启用平滑处理  //'linearDual'  'bilinear'  	.smooth('linearDual')
+				
 			// 预处理数据，确保NaN值被正确处理
 			function handleNullInGrid(gridData) {
 				// 创建一个副本，避免修改原始数据
 				const processedData = [...gridData];
-
+				
 				// 确保所有NaN和null值被正确替换为D3能理解的值
 				for (let i = 0; i < processedData.length; i++) {
 					if (processedData[i] === null || isNaN(processedData[i])) {
 						processedData[i] = NaN; // D3 contour generator会跳过NaN值
 					}
 				}
-
+				
 				return processedData;
 			}
-
+			
 			// 计算等值线 - 使用预处理的数据
 			let contours = contourGenerator(handleNullInGrid(processedGridData));
 
@@ -354,233 +316,6 @@
 			stats.domElement.style.top = "0px";
 			document.getElementById("container").appendChild(stats.domElement);
 
-			// 保存所有等值线网格的引用，以便更新
-			const contourMeshes = [];
-			const contourLabels = []; // 保存等值线标注的引用
-
-			// 材质缓存，避免重复创建
-			const materialCache = new Map();
-
-			// 获取或创建材质
-			function getMaterial(color, isLine = false, renderIndex = 0) {
-				const key =
-					color.toString() + (isLine ? "_line" : "_mesh") + "_" + renderIndex;
-
-				if (materialCache.has(key)) {
-					return materialCache.get(key);
-				}
-
-				let material;
-				if (isLine) {
-					// 检查是否是特定轮廓值（100,200,300等）
-					const isSpecificContour = specificThresholds.includes(
-						parseFloat(renderIndex)
-					);
-
-					material = new THREE.LineBasicMaterial({
-						color: color,
-						linewidth: isSpecificContour ? 3 : 1,
-						depthTest: false,
-						depthWrite: false,
-						transparent: true,
-						opacity: isSpecificContour ? 1.0 : 0.8,
-					});
-				} else {
-					material = new THREE.MeshBasicMaterial({
-						color: color,
-						transparent: true,
-						opacity: 0.8,
-						side: THREE.DoubleSide,
-						depthWrite: false,
-						depthTest: true,
-					});
-				}
-
-				materialCache.set(key, material);
-				return material;
-			}
-
-			// 创建等值线
-			function createContours() {
-				// 清除现有的等值线网格
-				contourMeshes.forEach((mesh) => {
-					scene.remove(mesh);
-					if (mesh.geometry) mesh.geometry.dispose();
-					if (mesh.material) mesh.material.dispose();
-				});
-				contourMeshes.length = 0;
-
-				// 清除现有的标注
-				contourLabels.forEach((label) => {
-					scene.remove(label);
-					if (label.geometry) label.geometry.dispose();
-					if (label.material) label.material.dispose();
-				});
-				contourLabels.length = 0;
-
-				// 清空材质缓存
-				materialCache.clear();
-
-				// 确保从低值到高值的顺序处理等值线 - 先进行排序
-				const sortedContours = [...contours].sort((a, b) => a.value - b.value);
-
-				// 统一处理等值线 - 同时创建面和线，确保一致性
-				for (let i = 0; i < sortedContours.length; i++) {
-					const contour = sortedContours[i];
-
-					// 创建等值线的形状
-					for (const polygon of contour.coordinates) {
-						// 检查多边形是否有足够的点形成一个有效的形状
-						if (!polygon || !polygon[0] || polygon[0].length < 3) {
-							continue; // 跳过无效的多边形
-						}
-
-						const shape = new THREE.Shape();
-
-						// 遍历轮廓线的点，转换到Three.js坐标系
-						for (let j = 0; j < polygon[0].length; j++) {
-							const point = polygon[0][j];
-
-							// 检查点是否存在
-							if (!point || point.length < 2) {
-								continue;
-							}
-
-							const [x, y] = point;
-
-							// 检查坐标值是否有效
-							if (x === undefined || y === undefined || isNaN(x) || isNaN(y)) {
-								continue; // 跳过无效坐标
-							}
-
-							// 转换D3网格坐标到数据坐标
-							const dataXPos = x; // xMin + (x / (gridSizeX - 1)) * (xMax - xMin);
-							const dataYPos = y; // yMin + (y / (gridSizeY - 1)) * (yMax - yMin);
-
-							// const dataXPos = xMin + (x / (gridSizeX - 1)) * (xMax - xMin);
-							// const dataYPos = yMin + (y / (gridSizeY - 1)) * (yMax - yMin);
-
-							// 使用比例尺将数据坐标转换到场景坐标
-							const sceneX = x; // xScale(dataXPos);
-							const sceneY = y; // yScale(dataYPos);
-
-							if (j === 0) {
-								shape.moveTo(sceneX, sceneY);
-							} else {
-								shape.lineTo(sceneX, sceneY);
-							}
-						}
-
-						// 闭合形状
-						shape.closePath();
-
-						// 处理内部孔洞
-						for (let j = 1; j < polygon.length; j++) {
-							// 检查孔洞是否有足够的点
-							if (!polygon[j] || polygon[j].length < 3) {
-								continue; // 跳过无效的孔洞
-							}
-
-							const hole = new THREE.Path();
-
-							for (let k = 0; k < polygon[j].length; k++) {
-								const point = polygon[j][k];
-
-								// 检查点是否存在
-								if (!point || point.length < 2) {
-									continue;
-								}
-
-								const [x, y] = point;
-
-								// 检查坐标值是否有效
-								if (
-									x === undefined ||
-									y === undefined ||
-									isNaN(x) ||
-									isNaN(y)
-								) {
-									continue; // 跳过无效坐标
-								}
-
-								// 转换D3网格坐标到数据坐标
-								const dataXPos = xMin + (x / (gridSizeX - 1)) * (xMax - xMin);
-								const dataYPos = yMin + (y / (gridSizeY - 1)) * (yMax - yMin);
-
-								// 使用比例尺将数据坐标转换到场景坐标
-								const sceneX = xScale(dataXPos);
-								const sceneY = yScale(dataYPos);
-
-								if (k === 0) {
-									hole.moveTo(sceneX, sceneY);
-								} else {
-									hole.lineTo(sceneX, sceneY);
-								}
-							}
-
-							shape.holes.push(hole);
-						}
-
-						// 尝试创建几何体，如果形状无效则跳过
-						let geometry;
-						try {
-							geometry = new THREE.ShapeGeometry(shape, 32);
-
-							// 检查几何体是否有效
-							if (geometry.attributes.position.count === 0) {
-								geometry.dispose();
-								continue; // 跳过空几何体
-							}
-						} catch (e) {
-							console.warn("创建几何体失败:", e);
-							continue; // 跳过失败的几何体
-						}
-
-						// 获取当前等值线的颜色
-						const colorStr = getTerrainColor(contour.value);
-						const color = parseColor(colorStr);
-
-						// 创建材质和网格
-						const material = getMaterial(color, false, contour.value);
-						const mesh = new THREE.Mesh(geometry, material);
-
-						// 设置z位置和渲染顺序，确保较高的等值线绘制在较低的上面
-						const zOffset = 0.0001 * i;
-						mesh.position.z = zOffset;
-						mesh.renderOrder = i;
-
-						// 添加到场景
-						scene.add(mesh);
-						contourMeshes.push(mesh);
-
-						// 如果需要显示等值线轮廓
-						if (showContourLines) {
-							// 检查是否是特定值的等值线
-							const isSpecificValue = specificThresholds.includes(
-								contour.value
-							);
-
-							// 创建线条几何体，使用相同的形状确保与面完全匹配
-							const lineGeometry = new THREE.EdgesGeometry(geometry);
-							const lineMaterial = getMaterial(
-								isSpecificValue ? 0xffffff : 0x888888,
-								true,
-								contour.value
-							);
-							const line = new THREE.LineSegments(lineGeometry, lineMaterial);
-
-							// 设置z位置和渲染顺序，确保线条绘制在面的上面
-							line.position.z = zOffset + 0.0001;
-							line.renderOrder = i + sortedContours.length;
-
-							// 添加到场景
-							scene.add(line);
-							contourMeshes.push(line);
-						}
-					}
-				}
-			}
-
 			// 添加光源
 			const ambientLight = new THREE.AmbientLight(0xffffff, 0.6);
 			scene.add(ambientLight);
@@ -588,7 +323,7 @@
 			const directionalLight = new THREE.DirectionalLight(0xffffff, 0.8);
 			directionalLight.position.set(1, 1, 1);
 			scene.add(directionalLight);
-
+			
 			// 添加以原点为中心的坐标轴辅助对象
 			const axesSize = Math.max(sceneWidth, sceneHeight) * 0.5; // 坐标轴尺寸
 			const axesHelper = new THREE.AxesHelper(axesSize);
@@ -596,79 +331,43 @@
 			axesHelper.setColors(
 				new THREE.Color(0xff0000), // X轴 - 红色
 				new THREE.Color(0x00ff00), // Y轴 - 绿色
-				new THREE.Color(0x0000ff) // Z轴 - 蓝色
+				new THREE.Color(0x0000ff)  // Z轴 - 蓝色
 			);
 			// 将坐标轴放置在原点(0,0,0)
 			axesHelper.position.set(0, 0, 0);
 			scene.add(axesHelper);
-
+			
 			// 添加网格辅助对象以更好地展示水平面
-			const gridHelper = new THREE.GridHelper(
-				axesSize * 2,
-				10,
-				0x444444,
-				0x333333
-			);
+			const gridHelper = new THREE.GridHelper(axesSize * 2, 10, 0x444444, 0x333333);
 			gridHelper.rotation.x = Math.PI / 2; // 旋转到XY平面
 			// 将网格放置在原点(0,0,0)
 			gridHelper.position.set(0, 0, 0);
 			scene.add(gridHelper);
-
+			
 			// 添加控制是否显示辅助对象的UI控件
-			const axesCheckbox = document.createElement("input");
-			axesCheckbox.type = "checkbox";
-			axesCheckbox.id = "showAxes";
+			const axesCheckbox = document.createElement('input');
+			axesCheckbox.type = 'checkbox';
+			axesCheckbox.id = 'showAxes';
 			axesCheckbox.checked = true;
-
-			const axesLabel = document.createElement("label");
-			axesLabel.htmlFor = "showAxes";
-			axesLabel.textContent = "显示坐标轴";
-
-			const axesDiv = document.createElement("div");
+			
+			const axesLabel = document.createElement('label');
+			axesLabel.htmlFor = 'showAxes';
+			axesLabel.textContent = '显示坐标轴';
+			
+			const axesDiv = document.createElement('div');
 			axesDiv.appendChild(axesCheckbox);
 			axesDiv.appendChild(axesLabel);
-
-			document.getElementById("controls").appendChild(axesDiv);
-
+			
+			document.getElementById('controls').appendChild(axesDiv);
+			
 			// 坐标轴显示控制
-			axesCheckbox.addEventListener("change", (event) => {
+			axesCheckbox.addEventListener('change', (event) => {
 				axesHelper.visible = event.target.checked;
 				gridHelper.visible = event.target.checked;
 			});
 
-			// 初始化
-			createContours();
-
-			// UI事件监听
-			document
-				.getElementById("showContourLines")
-				.addEventListener("change", (event) => {
-					showContourLines = event.target.checked;
-					createContours(); // 重新创建等值线
-				});
-
-			// 窗口大小调整处理
-			window.addEventListener("resize", () => {
-				camera.aspect = window.innerWidth / window.innerHeight;
-				camera.updateProjectionMatrix();
-				renderer.setSize(window.innerWidth, window.innerHeight);
-			});
-
-			// 动画循环
-			function animate() {
-				requestAnimationFrame(animate);
-				controls.update();
-				renderer.render(scene, camera);
-				stats.update();
-			}
-
-			animate();
-
-			// 初始化地图////////////////////////////////////////////////////////////
-
-			// 等值线
-					//===== 等值线类定义 =====
-					class Contour {
+			//===== 等值线类定义 =====
+			class Contour {
 				constructor(options = {}) {
 					// 默认选项
 					this.options = {
@@ -863,7 +562,7 @@
 						.thresholds(this.specificThresholds)
 						.x(this.dataX)
 						.y(this.dataY)
-						.smooth(true);
+						.smooth(false);
 						
 					// 计算等值线 - 使用预处理的数据
 					const contours = contourGenerator(this.handleNullInGrid(processedGridData));
@@ -1071,118 +770,37 @@
 				showContourLines: true,
 				showContourLabels: false
 			});
+			
+			// 获取等值线组并添加到场景
+			const contourGroup = contourRenderer.init();
+			scene.add(contourGroup);
 
-			// 创建地图
-			function createMap() {
-				// 影像数据源
-				const imgSource = [source.arcGisSource, source.arcGisCiaSource];
-				// 地形数据源
-				const demSource = source.arcGisDemSource;
-
-				// 创建地图对象
-				const map = new tt.TileMap({
-					// 影像数据源
-					imgSource: imgSource,
-					// 高程数据源
-					demSource: demSource,
-					// 地图投影中央经线经度
-					lon0: 90,
-					// 最小缩放级别
-					minLevel: 2,
-					// 最大缩放级别
-					maxLevel: 20,
+			// UI事件监听
+			document
+				.getElementById("showContourLines")
+				.addEventListener("change", (event) => {
+					// 更新contour选项并重新生成
+					contourRenderer.updateOptions({
+						showContourLines: event.target.checked
+					});
 				});
 
-				// map.scale.setScalar(1000);
+			// 窗口大小调整处理
+			window.addEventListener("resize", () => {
+				camera.aspect = window.innerWidth / window.innerHeight;
+				camera.updateProjectionMatrix();
+				renderer.setSize(window.innerWidth, window.innerHeight);
+			});
 
-				// 地图旋转到xz平面
-				map.rotateX(-Math.PI / 2);
-				// 开启阴影
-				// map.receiveShadow = true;
-
-				// 地图准备就绪
-				map.addEventListener("ready", () => console.log("Map ready!!!!!!"));
-
-				return map;
+			// 动画循环
+			function animate() {
+				requestAnimationFrame(animate);
+				controls.update();
+				renderer.render(scene, camera);
+				stats.update();
 			}
 
-			// 初始化三维场景
-			function initViewer(id, map) {
-				// 初始化场景
-				const viewer = new plugin.GLViewer(id);
-				// 地图添加到场景
-				viewer.scene.add(map);
-
-				// 填加伪球体
-				// const frakeEarth = plugin.createFrakEarth(map);
-				// map.add(frakeEarth);
-				// map.addEventListener("update", () => {
-				// 	frakeEarth.visible = viewer.controls.getDistance() > 5e5;
-				// });
-
-				// 添加罗盘
-				// const compass = plugin.createCompass(viewer.controls);
-				// document.querySelector("#compass-container")?.appendChild(compass.dom);
-
-				// 防止摄像机进入地下
-				viewer.addEventListener("update", () => {
-					plugin.limitCameraHeight(map, viewer.camera);
-				});
-
-				// 测试
-				// const imageBounds = map.projection.getProjBounds([105, 33, 109, 37]);
-				// const imageMesh = createBoundsMesh(imageBounds, 0xffff00);
-				// map.add(imageMesh);
-
-				// const tileBounds = map.projection.getTileBounds(7, 2, 3);
-				// const tileMesh = createBoundsMesh(tileBounds, 0xff0000);
-				// map.add(tileMesh);
-
-				// const mapBounds = map.imgSource[0]._projectionBounds;
-				// const mapMesh = createBoundsMesh(mapBounds, 0x00ff00);
-				// map.add(mapMesh);
-
-				return viewer;
-			}
-
-			// 动画漫游指定位置
-			function fly(viewer, map) {
-				// 地图中心坐标(经度，纬度，高度)
-				const centerGeo = new  THREE.Vector3(108, 34, 0);
-				// 摄像坐标(经度，纬度，高度)
-				const camersGeo = new THREE.Vector3(108, 0, 10000);
-				// 地图中心经纬度高度转为世界坐标
-				const centerPosition = map.geo2world(centerGeo);
-				// 摄像经纬度高度转为世界坐标
-				const cmaeraPosition = map.geo2world(camersGeo);
-				viewer.controls.enabled = false;
-				// 飞到指定位置
-				viewer.flyTo(centerPosition, cmaeraPosition, true, () => {
-					viewer.controls.enabled = true;
-				});
-			}
-
-			// 创建地图
-			const map = createMap();
-			// 创建视图
-			const viewer = initViewer("#map", map);
-
-			const geoGroup = new THREE.Group();
-			geoGroup.renderOrder = 10;
-
-			// 地图中心经纬度高度
-			const centerGeo = new THREE.Vector3(108, 34, 0);
-			// 摄像机经纬度高度
-			const cameraGeo = new THREE.Vector3(108, 0, 10000);
-
-			const center = map.geo2pos(centerGeo);
-			const geo = new THREE.BoxGeometry(80000, 80000, 10000);
-			const box = new THREE.Mesh(geo);
-			box.position.set(center.x, center.y, 510);
-			geoGroup.add(new THREE.BoxHelper(box));
-			map.add(geoGroup);
-			// 摄像机动画移动到3000高度
-			fly(viewer, map);
+			animate();
 		</script>
 	</body>
 </html>
