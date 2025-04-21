@@ -739,12 +739,44 @@
 				return viewer;
 			}
 
+			// 动画漫游指定位置
+			function fly(viewer, map) {
+				// 地图中心坐标(经度，纬度，高度)
+				const centerGeo = new  THREE.Vector3(108, 34, 0);
+				// 摄像坐标(经度，纬度，高度)
+				const camersGeo = new THREE.Vector3(108, 0, 10000);
+				// 地图中心经纬度高度转为世界坐标
+				const centerPosition = map.geo2world(centerGeo);
+				// 摄像经纬度高度转为世界坐标
+				const cmaeraPosition = map.geo2world(camersGeo);
+				viewer.controls.enabled = false;
+				// 飞到指定位置
+				viewer.flyTo(centerPosition, cmaeraPosition, true, () => {
+					viewer.controls.enabled = true;
+				});
+			}
+
 			// 创建地图
 			const map = createMap();
 			// 创建视图
 			const viewer = initViewer("#map", map);
+
+			const geoGroup = new THREE.Group();
+			geoGroup.renderOrder = 10;
+
+			// 地图中心经纬度高度
+			const centerGeo = new THREE.Vector3(108, 34, 0);
+			// 摄像机经纬度高度
+			const cameraGeo = new THREE.Vector3(108, 0, 10000);
+
+			const center = map.geo2pos(centerGeo);
+			const geo = new THREE.BoxGeometry(80000, 80000, 10000);
+			const box = new THREE.Mesh(geo);
+			box.position.set(center.x, center.y, 510);
+			geoGroup.add(new THREE.BoxHelper(box));
+			map.add(geoGroup);
 			// 摄像机动画移动到3000高度
-			// fly(viewer, map);
+			fly(viewer, map);
 		</script>
 	</body>
 </html>
