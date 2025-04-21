@@ -67,7 +67,7 @@
 			import * as THREE from "three";
 			import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 			import Stats from "three/addons/libs/stats.module.js";
-			import { contourData } from "./contourData2.js";
+			import { contourData } from "./contourData.js";
 			import { contours as ztContours, contourDensity } from "./d3_zoutao.js";
 			// ===== D3.js 部分：生成等值线数据 =====
 			// 配置参数
@@ -143,6 +143,8 @@
 				.domain([yMin, yMax])
 				.range([sceneHeight / 2, -sceneHeight / 2]); // Y轴翻转，因为Three.js和屏幕坐标Y轴方向相反
 
+
+		    const { x, y, v } = contourData.data;
 			// 生成地形数据
 			const processedGridData = processContourData();
 
@@ -161,6 +163,9 @@
 			const contourGenerator = ztContours()
 				.size([gridSizeX, gridSizeY])
 				.thresholds(specificThresholds)
+				// .smooth(true)
+				.x(x)
+				.y(y)
 				.smooth(true)
 				// .smooth("spline")
 				// .smoothTension(0.2)
@@ -411,12 +416,15 @@
 							}
 
 							// 转换D3网格坐标到数据坐标
-							const dataXPos = xMin + (x / (gridSizeX - 1)) * (xMax - xMin);
-							const dataYPos = yMin + (y / (gridSizeY - 1)) * (yMax - yMin);
+							const dataXPos = x; // xMin + (x / (gridSizeX - 1)) * (xMax - xMin);
+							const dataYPos = y; // yMin + (y / (gridSizeY - 1)) * (yMax - yMin);
+
+							// const dataXPos = xMin + (x / (gridSizeX - 1)) * (xMax - xMin);
+							// const dataYPos = yMin + (y / (gridSizeY - 1)) * (yMax - yMin);
 
 							// 使用比例尺将数据坐标转换到场景坐标
-							const sceneX = xScale(dataXPos);
-							const sceneY = yScale(dataYPos);
+							const sceneX = x; // xScale(dataXPos);
+							const sceneY = y; // yScale(dataYPos);
 
 							if (j === 0) {
 								shape.moveTo(sceneX, sceneY);
