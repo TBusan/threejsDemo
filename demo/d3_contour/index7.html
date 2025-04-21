@@ -67,7 +67,7 @@
 			import * as THREE from "three";
 			import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 			import Stats from "three/addons/libs/stats.module.js";
-			import { contourData } from "./contourData.js";
+			import { contourData } from "./contourData2.js";
 			import { contours as ztContours, contourDensity } from "./d3_zoutao.js";
 			// ===== D3.js 部分：生成等值线数据 =====
 			// 配置参数
@@ -91,26 +91,26 @@
 			const gridSizeY = dataY.length;
 
 			// 创建一维数组来存储数据，以供D3使用
-			const gridData = new Array(gridSizeY * gridSizeX);
+			// const gridData = new Array(gridSizeY * gridSizeX);
 
 			// 处理contourData中的数据，转换为D3可用的格式
-			function processContourData() {
-				// 将二维数组扁平化为一维
-				for (let y = 0; y < gridSizeY; y++) {
-					for (let x = 0; x < gridSizeX; x++) {
-						const value = dataValues[y][x];
+			// function processContourData() {
+			// 	// 将二维数组扁平化为一维
+			// 	for (let y = 0; y < gridSizeY; y++) {
+			// 		for (let x = 0; x < gridSizeX; x++) {
+			// 			const value = dataValues[y][x];
 
-						// null值处理：将null值替换为NaN，让D3正确跳过这些区域
-						if (value === null || value === undefined) {
-							gridData[y * gridSizeX + x] = NaN;
-						} else {
-							gridData[y * gridSizeX + x] = value;
-						}
-					}
-				}
+			// 			// null值处理：将null值替换为NaN，让D3正确跳过这些区域
+			// 			if (value === null || value === undefined) {
+			// 				gridData[y * gridSizeX + x] = NaN;
+			// 			} else {
+			// 				gridData[y * gridSizeX + x] = value;
+			// 			}
+			// 		}
+			// 	}
 
-				return gridData;
-			}
+			// 	return gridData;
+			// }
 
 			// 获取实际的数据范围
 			const xMin = d3.min(dataX);
@@ -133,158 +133,158 @@
 			const cameraDistance = Math.max(dataAspectRatio, 2) * 1.2; // 确保能看到整个场景
 
 			// 创建比例尺 - 使用准确的数据范围和比例
-			const xScale = d3
-				.scaleLinear()
-				.domain([xMin, xMax])
-				.range([-sceneWidth / 2, sceneWidth / 2]);
+			// const xScale = d3
+			// 	.scaleLinear()
+			// 	.domain([xMin, xMax])
+			// 	.range([-sceneWidth / 2, sceneWidth / 2]);
 
-			const yScale = d3
-				.scaleLinear()
-				.domain([yMin, yMax])
-				.range([sceneHeight / 2, -sceneHeight / 2]); // Y轴翻转，因为Three.js和屏幕坐标Y轴方向相反
+			// const yScale = d3
+			// 	.scaleLinear()
+			// 	.domain([yMin, yMax])
+			// 	.range([sceneHeight / 2, -sceneHeight / 2]); // Y轴翻转，因为Three.js和屏幕坐标Y轴方向相反
 
 
-		    const { x, y, v } = contourData.data;
-			// 生成地形数据
-			const processedGridData = processContourData();
+		    // const { x, y, v } = contourData.data;
+			// // 生成地形数据
+			// const processedGridData = processContourData();
 
-			// 基于数据范围自动生成等值线阈值
-			const valueRange = zMax - zMin;
-			const thresholdCount = 20;
-			const thresholds = [];
+			// // 基于数据范围自动生成等值线阈值
+			// const valueRange = zMax - zMin;
+			// const thresholdCount = 20;
+			// const thresholds = [];
 
 			// 添加特定阈值
-			const specificThresholds = [-100,-50, 0, 50,100,150, 200,250, 300,350, 400,450, 500,550,600,650,700,750,800,850,900, 980];
+			// const specificThresholds = [-100,-50, 0, 50,100,150, 200,250, 300,350, 400,450, 500,550,600,650,700,750,800,850,900, 980];
 			// const specificThresholds = [
 			// 	-100, 1.85, 64.44, 127.04, 189.63, 252.23, 314.83, 377.42, 440.02,
 			// 	502.61, 565.21, 627.8, 690.4, 752.99, 815.59, 878.18, 940.78,
 			// ];
 			// 使用d3.contours()从处理后的网格数据生成等值线
-			const contourGenerator = ztContours()
-				.size([gridSizeX, gridSizeY])
-				.thresholds(specificThresholds)
-				// .smooth(true)
-				.x(x)
-				.y(y)
-				.smooth(true)
+			// const contourGenerator = ztContours()
+			// 	.size([gridSizeX, gridSizeY])
+			// 	.thresholds(specificThresholds)
+			// 	// .smooth(true)
+			// 	.x(x)
+			// 	.y(y)
+			// 	.smooth(true)
 				// .smooth("spline")
 				// .smoothTension(0.2)
 				//  // 启用平滑处理  //'linearDual'  'bilinear'  	.smooth('linearDual')
 				
 			// 预处理数据，确保NaN值被正确处理
-			function handleNullInGrid(gridData) {
-				// 创建一个副本，避免修改原始数据
-				const processedData = [...gridData];
+			// function handleNullInGrid(gridData) {
+			// 	// 创建一个副本，避免修改原始数据
+			// 	const processedData = [...gridData];
 				
-				// 确保所有NaN和null值被正确替换为D3能理解的值
-				for (let i = 0; i < processedData.length; i++) {
-					if (processedData[i] === null || isNaN(processedData[i])) {
-						processedData[i] = NaN; // D3 contour generator会跳过NaN值
-					}
-				}
+			// 	// 确保所有NaN和null值被正确替换为D3能理解的值
+			// 	for (let i = 0; i < processedData.length; i++) {
+			// 		if (processedData[i] === null || isNaN(processedData[i])) {
+			// 			processedData[i] = NaN; // D3 contour generator会跳过NaN值
+			// 		}
+			// 	}
 				
-				return processedData;
-			}
+			// 	return processedData;
+			// }
 			
 			// 计算等值线 - 使用预处理的数据
-			let contours = contourGenerator(handleNullInGrid(processedGridData));
+			// let contours = contourGenerator(handleNullInGrid(processedGridData));
 
-			console.log("==contours==", contours);
+			// console.log("==contours==", contours);
 
-			// 颜色比例尺 - 使用紫蓝色系
-			function getTerrainColor(value) {
-				// 根据数据范围创建颜色映射
-				// const minVal = zMin;
-				// const maxVal = zMax;
-				// const step = (maxVal - minVal) / 22;
+			// // 颜色比例尺 - 使用紫蓝色系
+			// function getTerrainColor(value) {
+			// 	// 根据数据范围创建颜色映射
+			// 	// const minVal = zMin;
+			// 	// const maxVal = zMax;
+			// 	// const step = (maxVal - minVal) / 22;
 
-				// // 使用紫蓝色系
-				// const localOriginColor = [
-				//     [minVal, "rgba(76,29,143,255)"],             // 深紫色
-				//     [minVal + step*1, "rgba(85,53,201,255)"],    // 紫色
-				//     [minVal + step*2, "rgba(73,63,189,255)"],    // 蓝紫色
-				//     [minVal + step*3, "rgba(56,93,220,255)"],    // 紫蓝色
-				//     [maxVal, "rgba(66,114,245,255)"]             // 蓝色
-				// ];
+			// 	// // 使用紫蓝色系
+			// 	// const localOriginColor = [
+			// 	//     [minVal, "rgba(76,29,143,255)"],             // 深紫色
+			// 	//     [minVal + step*1, "rgba(85,53,201,255)"],    // 紫色
+			// 	//     [minVal + step*2, "rgba(73,63,189,255)"],    // 蓝紫色
+			// 	//     [minVal + step*3, "rgba(56,93,220,255)"],    // 紫蓝色
+			// 	//     [maxVal, "rgba(66,114,245,255)"]             // 蓝色
+			// 	// ];
 
-				const localOriginColor = [
-					[-100, "rgba(126,84,255,255)"],
-					[-50, "rgba(99,66,255,255)"],
-					[0, "rgba(72,48,255,255)"],
-					[50, "rgba(45,30,255,255)"],
-					[100, "rgba(18,12,255,255)"],
-					[150, "rgba(0,15,240,255)"],
-					[200, "rgba(0,60,195,255)"],
-					[250, "rgba(0,105,150,255)"],
-					[300, "rgba(0,150,105,255)"],
-					[350, "rgba(0,195,60,255)"],
-					[400, "rgba(0,240,15,255)"],
-					[450, "rgba(30,255,0,255)"],
-					[500, "rgba(75,255,0,255)"],
-					[550, "rgba(120,255,0,255)"],
-					[600, "rgba(165,255,0,255)"],
-					[650, "rgba(210,255,0,255)"],
-					[700, "rgba(255,255,0,255)"],
-					[750, "rgba(255,228,0,255)"],
-					[800, "rgba(255,201,0,255)"],
-					[850, "rgba(255,174,0,255)"],
-					[900, "rgba(255,147,0,255)"],
-					[950, "rgba(255,120,0,255)"],
-					[1000, "rgba(255,96,0,255)"],
-				];
+			// 	const localOriginColor = [
+			// 		[-100, "rgba(126,84,255,255)"],
+			// 		[-50, "rgba(99,66,255,255)"],
+			// 		[0, "rgba(72,48,255,255)"],
+			// 		[50, "rgba(45,30,255,255)"],
+			// 		[100, "rgba(18,12,255,255)"],
+			// 		[150, "rgba(0,15,240,255)"],
+			// 		[200, "rgba(0,60,195,255)"],
+			// 		[250, "rgba(0,105,150,255)"],
+			// 		[300, "rgba(0,150,105,255)"],
+			// 		[350, "rgba(0,195,60,255)"],
+			// 		[400, "rgba(0,240,15,255)"],
+			// 		[450, "rgba(30,255,0,255)"],
+			// 		[500, "rgba(75,255,0,255)"],
+			// 		[550, "rgba(120,255,0,255)"],
+			// 		[600, "rgba(165,255,0,255)"],
+			// 		[650, "rgba(210,255,0,255)"],
+			// 		[700, "rgba(255,255,0,255)"],
+			// 		[750, "rgba(255,228,0,255)"],
+			// 		[800, "rgba(255,201,0,255)"],
+			// 		[850, "rgba(255,174,0,255)"],
+			// 		[900, "rgba(255,147,0,255)"],
+			// 		[950, "rgba(255,120,0,255)"],
+			// 		[1000, "rgba(255,96,0,255)"],
+			// 	];
 
-				// const localOriginColor = [
-				// 	// [-100, "rgba(126,84,255,255)"],
-				// 	[-100, "rgba(126,84,255,255)"],
-				// 	[1.85, "#7D2030"],
-				// 	[64.44, "rgba(99,66,255,255)"],
-				// 	[127.04, "rgba(72,48,255,255)"],
-				// 	[189.63, "rgba(45,30,255,255)"],
-				// 	[252.23, "rgba(18,12,255,255)"],
-				// 	[314.83, "rgba(0,15,240,255)"],
-				// 	[377.42, "rgba(0,60,195,255)"],
-				// 	[440.02, "rgba(0,105,150,255)"],
-				// 	[502.61, "rgba(0,150,105,255)"],
-				// 	[565.21, "rgba(0,195,60,255)"],
-				// 	[627.8, "rgba(0,240,15,255)"],
-				// 	[690.4, "rgba(30,255,0,255)"],
-				// 	[752.99, "rgba(75,255,0,255)"],
-				// 	[815.59, "rgba(120,255,0,255)"],
-				// 	[878.18, "rgba(165,255,0,255)"],
-				// 	[940.78, "rgba(210,255,0,255)"],
-				// ];
+			// 	// const localOriginColor = [
+			// 	// 	// [-100, "rgba(126,84,255,255)"],
+			// 	// 	[-100, "rgba(126,84,255,255)"],
+			// 	// 	[1.85, "#7D2030"],
+			// 	// 	[64.44, "rgba(99,66,255,255)"],
+			// 	// 	[127.04, "rgba(72,48,255,255)"],
+			// 	// 	[189.63, "rgba(45,30,255,255)"],
+			// 	// 	[252.23, "rgba(18,12,255,255)"],
+			// 	// 	[314.83, "rgba(0,15,240,255)"],
+			// 	// 	[377.42, "rgba(0,60,195,255)"],
+			// 	// 	[440.02, "rgba(0,105,150,255)"],
+			// 	// 	[502.61, "rgba(0,150,105,255)"],
+			// 	// 	[565.21, "rgba(0,195,60,255)"],
+			// 	// 	[627.8, "rgba(0,240,15,255)"],
+			// 	// 	[690.4, "rgba(30,255,0,255)"],
+			// 	// 	[752.99, "rgba(75,255,0,255)"],
+			// 	// 	[815.59, "rgba(120,255,0,255)"],
+			// 	// 	[878.18, "rgba(165,255,0,255)"],
+			// 	// 	[940.78, "rgba(210,255,0,255)"],
+			// 	// ];
 
-				const localOriginColorLen = localOriginColor.length;
-				const localOriginColorMin = localOriginColor[0][0];
-				const localOriginColorMax =
-					localOriginColor[localOriginColorLen - 1][0];
+			// 	const localOriginColorLen = localOriginColor.length;
+			// 	const localOriginColorMin = localOriginColor[0][0];
+			// 	const localOriginColorMax =
+			// 		localOriginColor[localOriginColorLen - 1][0];
 
-				if (value <= localOriginColorMin) {
-					return localOriginColor[0][1];
-				} else if (value >= localOriginColorMax) {
-					return localOriginColor[localOriginColorLen - 1][1];
-				} else {
-					for (let i = 0; i < localOriginColorLen - 1; i++) {
-						if (
-							value >= localOriginColor[i][0] &&
-							value < localOriginColor[i + 1][0]
-						) {
-							return localOriginColor[i + 1][1];
-						}
-					}
-					return localOriginColor[0][1];
-				}
-			}
+			// 	if (value <= localOriginColorMin) {
+			// 		return localOriginColor[0][1];
+			// 	} else if (value >= localOriginColorMax) {
+			// 		return localOriginColor[localOriginColorLen - 1][1];
+			// 	} else {
+			// 		for (let i = 0; i < localOriginColorLen - 1; i++) {
+			// 			if (
+			// 				value >= localOriginColor[i][0] &&
+			// 				value < localOriginColor[i + 1][0]
+			// 			) {
+			// 				return localOriginColor[i + 1][1];
+			// 			}
+			// 		}
+			// 		return localOriginColor[0][1];
+			// 	}
+			// }
 
-			// 解析颜色字符串为THREE.Color
-			function parseColor(colorStr) {
-				const rgba = colorStr.match(/\d+/g).map(Number);
-				return new THREE.Color(rgba[0] / 255, rgba[1] / 255, rgba[2] / 255);
-			}
+			// // 解析颜色字符串为THREE.Color
+			// function parseColor(colorStr) {
+			// 	const rgba = colorStr.match(/\d+/g).map(Number);
+			// 	return new THREE.Color(rgba[0] / 255, rgba[1] / 255, rgba[2] / 255);
+			// }
 
 			// ===== Three.js 部分：3D 渲染 =====
 			const scene = new THREE.Scene();
-			scene.background = new THREE.Color(0x222222);
+			scene.background = new THREE.Color('#ffffff');
 
 			// 设置摄像机
 			const camera = new THREE.PerspectiveCamera(
@@ -373,15 +373,17 @@
 					this.options = {
 						showContourLines: true,
 						showContourLabels: false,
+						smooth: true,
 						...options
 					};
 					
 					// 初始化成员变量
-					this.dataX = contourData.data.x; // X坐标数组
-					this.dataY = contourData.data.y; // Y坐标数组
-					this.dataValues = contourData.data.v; // 值的二维数组
-					this.zMin = contourData.data.zmin; // 最小值
-					this.zMax = contourData.data.zmax; // 最大值
+					this.contourData = contourData;
+					this.dataX = this.contourData.data.x; // X坐标数组
+					this.dataY = this.contourData.data.y; // Y坐标数组
+					this.dataValues = this.contourData.data.v; // 值的二维数组
+					this.zMin = this.contourData.data.zmin; // 最小值
+					this.zMax = this.contourData.data.zmax; // 最大值
 					
 					// 获取数据网格尺寸
 					this.gridSizeX = this.dataX.length;
@@ -562,7 +564,7 @@
 						.thresholds(this.specificThresholds)
 						.x(this.dataX)
 						.y(this.dataY)
-						.smooth(false);
+						.smooth(this.options.smooth);
 						
 					// 计算等值线 - 使用预处理的数据
 					const contours = contourGenerator(this.handleNullInGrid(processedGridData));
@@ -628,8 +630,8 @@
 								}
 
 								// 使用比例尺将数据坐标转换到场景坐标
-								const sceneX = this.xScale(x);
-								const sceneY = this.yScale(y);
+								const sceneX = x; //this.xScale(x);
+								const sceneY = y; //this.yScale(y);
 
 								if (j === 0) {
 									shape.moveTo(sceneX, sceneY);
@@ -737,6 +739,37 @@
 							}
 						}
 					}
+					
+					// 添加边界线
+					this.addBoundaryLine();
+				}
+				
+				// 添加外部边界线
+				addBoundaryLine() {
+					// 创建边界点
+					const borderPoints = [
+						new THREE.Vector3(this.xScale(this.xMin), this.yScale(this.yMin), 0.001),
+						new THREE.Vector3(this.xScale(this.xMax), this.yScale(this.yMin), 0.001),
+						new THREE.Vector3(this.xScale(this.xMax), this.yScale(this.yMax), 0.001),
+						new THREE.Vector3(this.xScale(this.xMin), this.yScale(this.yMax), 0.001),
+						new THREE.Vector3(this.xScale(this.xMin), this.yScale(this.yMin), 0.001)
+					];
+					
+					// 创建边界线几何体
+					const borderGeometry = new THREE.BufferGeometry().setFromPoints(borderPoints);
+					const borderMaterial = new THREE.LineBasicMaterial({
+						color: 0x333333,
+						linewidth: 1,
+						opacity: 0.3,
+						transparent: true,
+						depthTest: false
+					});
+					
+					const borderLine = new THREE.Line(borderGeometry, borderMaterial);
+					borderLine.renderOrder = 1000; // 确保边界线始终显示在最上层
+					
+					this.contourGroup.add(borderLine);
+					this.contourMeshes.push(borderLine);
 				}
 				
 				// 更新等值线显示设置
@@ -753,7 +786,7 @@
 						.thresholds(this.specificThresholds)
 						.x(this.dataX)
 						.y(this.dataY)
-						.smooth(true);
+						.smooth(this.options.smooth);
 						
 					// 计算等值线 - 使用预处理的数据
 					const contours = contourGenerator(this.handleNullInGrid(processedGridData));
@@ -763,16 +796,44 @@
 					
 					return this.contourGroup;
 				}
+				
+				// 显示或隐藏等值线轮廓
+				toggleContourLines(show) {
+					this.options.showContourLines = show;
+					this.updateOptions();
+				}
+				
+				// 设置新的阈值
+				setThresholds(thresholds) {
+					this.specificThresholds = thresholds;
+					this.updateOptions();
+				}
+				
+				// 获取相机合适的距离
+				getCameraDistance() {
+					return Math.max(this.dataAspectRatio, 2) * 1.2;
+				}
+				
+				// 获取场景尺寸
+				getSceneDimensions() {
+					return {
+						width: this.sceneWidth,
+						height: this.sceneHeight,
+						aspectRatio: this.dataAspectRatio
+					};
+				}
 			}
 
 			// 创建Contour实例并初始化
 			const contourRenderer = new Contour({
 				showContourLines: true,
-				showContourLabels: false
+				showContourLabels: false,
+				smooth: true
 			});
 			
 			// 获取等值线组并添加到场景
 			const contourGroup = contourRenderer.init();
+			debugger
 			scene.add(contourGroup);
 
 			// UI事件监听
@@ -780,9 +841,7 @@
 				.getElementById("showContourLines")
 				.addEventListener("change", (event) => {
 					// 更新contour选项并重新生成
-					contourRenderer.updateOptions({
-						showContourLines: event.target.checked
-					});
+					contourRenderer.toggleContourLines(event.target.checked);
 				});
 
 			// 窗口大小调整处理
