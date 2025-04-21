@@ -119,32 +119,59 @@ function fillNaN(values, width, height, maxIterations = 100, tolerance = 1e-4) {
   return result;
 }
 
-var cases = [
-  [],
-  [[[1.0, 1.5], [0.5, 1.0]]],
-  [[[1.5, 1.0], [1.0, 1.5]]],
-  [[[1.5, 1.0], [0.5, 1.0]]],
-  [[[1.0, 0.5], [1.5, 1.0]]],
-  [[[1.0, 1.5], [0.5, 1.0]], [[1.0, 0.5], [1.5, 1.0]]],
-  [[[1.0, 0.5], [1.0, 1.5]]],
-  [[[1.0, 0.5], [0.5, 1.0]]],
-  [[[0.5, 1.0], [1.0, 0.5]]],
-  [[[1.0, 1.5], [1.0, 0.5]]],
-  [[[0.5, 1.0], [1.0, 0.5]], [[1.5, 1.0], [1.0, 1.5]]],
-  [[[1.5, 1.0], [1.0, 0.5]]],
-  [[[0.5, 1.0], [1.5, 1.0]]],
-  [[[1.0, 1.5], [1.5, 1.0]]],
-  [[[0.5, 1.0], [1.0, 1.5]]],
-  []
-];
-
 function Contours() {
   var dx = 1,
       dy = 1,
       threshold = d3Array.thresholdSturges,
       smooth = smoothLinear,
-      connectGaps = false, // 新增参数控制是否填充缺失值
-      smoothTension = 0.5; // 新增参数控制曲线平滑度
+      connectGaps = false,
+      smoothTension = 0.5,
+      simplifyThreshold = 0.1; // 新增简化阈值参数
+
+  var cases = [
+    [],
+    [[[1.0, 1.5], [0.5, 1.0]]],
+    [[[1.5, 1.0], [1.0, 1.5]]],
+    [[[1.5, 1.0], [0.5, 1.0]]],
+    [[[1.0, 0.5], [1.5, 1.0]]],
+    function(values, x, y, dx) {  // 添加dx参数
+      const v00 = values[y * dx + x];
+      const v10 = values[y * dx + x + 1];
+      const v01 = values[(y + 1) * dx + x];
+      const v11 = values[(y + 1) * dx + x + 1];
+      const s = (v00 + v11) - (v01 + v10);
+      return s >= 0 ? [
+        [[1.0, 1.5], [0.5, 1.0]],
+        [[1.0, 0.5], [1.5, 1.0]]
+      ] : [
+        [[1.0, 1.5], [1.5, 1.0]],
+        [[0.5, 1.0], [1.0, 0.5]]
+      ];
+    },
+    [[[1.0, 0.5], [1.0, 1.5]]],
+    [[[1.0, 0.5], [0.5, 1.0]]],
+    [[[0.5, 1.0], [1.0, 0.5]]],
+    [[[1.0, 1.5], [1.0, 0.5]]],
+    function(values, x, y, dx) {  // 添加dx参数
+      const v00 = values[y * dx + x];
+      const v10 = values[y * dx + x + 1];
+      const v01 = values[(y + 1) * dx + x];
+      const v11 = values[(y + 1) * dx + x + 1];
+      const s = (v00 + v11) - (v01 + v10);
+      return s >= 0 ? [
+        [[0.5, 1.0], [1.0, 0.5]],
+        [[1.5, 1.0], [1.0, 1.5]]
+      ] : [
+        [[0.5, 1.0], [1.5, 1.0]],
+        [[1.0, 0.5], [1.0, 1.5]]
+      ];
+    },
+    [[[1.5, 1.0], [1.0, 0.5]]],
+    [[[0.5, 1.0], [1.5, 1.0]]],
+    [[[1.0, 1.5], [1.5, 1.0]]],
+    [[[0.5, 1.0], [1.0, 1.5]]],
+    []
+  ];
 
   function contours(values) {
     // 处理缺失值
@@ -183,8 +210,19 @@ function Contours() {
       } else {
         smooth(ring, values, v);
       }
-      if (area(ring) > 0) polygons.push([ring]);
-      else holes.push(ring);
+      
+      // 应用Douglas-Peucker简化
+      if (simplifyThreshold > 0) {
+        ring = simplifyRing(ring, simplifyThreshold);
+      }
+      
+      // 处理闭合环
+      if (area(ring) > 0) {
+        polygons.push([ring]);
+      } else {
+        // 增强孔洞检测逻辑
+        processHole(ring, polygons, holes);
+      }
     });
 
     holes.forEach(function(hole) {
@@ -208,6 +246,7 @@ function Contours() {
   function isorings(values, value, callback) {
     var fragmentByStart = new Array,
         fragmentByEnd = new Array,
+        boundaryPoints = new Map(),
         x, y, t0, t1, t2, t3;
 
     // Special case for the first row (y = -1, t2 = t3 = 0).
@@ -215,7 +254,8 @@ function Contours() {
     t1 = above(values[0], value);
     cases[t1 << 1].forEach(stitch);
     while (++x < dx - 1) {
-      t0 = t1, t1 = above(values[x + 1], value);
+      t0 = t1;
+      t1 = above(values[x + 1], value);
       cases[t0 | t1 << 1].forEach(stitch);
     }
     cases[t1 << 0].forEach(stitch);
@@ -225,13 +265,15 @@ function Contours() {
       x = -1;
       t1 = above(values[y * dx + dx], value);
       t2 = above(values[y * dx], value);
-      cases[t1 << 1 | t2 << 2].forEach(stitch);
+      processCase(t1 << 1 | t2 << 2, x, y);
       while (++x < dx - 1) {
-        t0 = t1, t1 = above(values[y * dx + dx + x + 1], value);
-        t3 = t2, t2 = above(values[y * dx + x + 1], value);
-        cases[t0 | t1 << 1 | t2 << 2 | t3 << 3].forEach(stitch);
+        t0 = t1;
+        t1 = above(values[y * dx + dx + x + 1], value);
+        t3 = t2;
+        t2 = above(values[y * dx + x + 1], value);
+        processCase(t0 | t1 << 1 | t2 << 2 | t3 << 3, x, y);
       }
-      cases[t1 | t2 << 3].forEach(stitch);
+      processCase(t1 | t2 << 3, x, y);
     }
 
     // Special case for the last row (y = dy - 1, t0 = t1 = 0).
@@ -246,8 +288,21 @@ function Contours() {
 
     function stitch(line) {
       var start = [line[0][0] + x, line[0][1] + y],
-          end = [line[1][0] + x, line[1][1] + y],
-          startIndex = index(start),
+          end = [line[1][0] + x, line[1][1] + y];
+      
+      // 边界点检测
+      const isStartBoundary = isBoundaryPoint(start);
+      const isEndBoundary = isBoundaryPoint(end);
+      
+      // 对边界点进行唯一化处理
+      if (isStartBoundary) {
+        start = snapToGrid(start);
+      }
+      if (isEndBoundary) {
+        end = snapToGrid(end);
+      }
+      
+      let startIndex = index(start),
           endIndex = index(end),
           f, g;
       if (f = fragmentByEnd[startIndex]) {
@@ -283,6 +338,38 @@ function Contours() {
       } else {
         fragmentByStart[startIndex] = fragmentByEnd[endIndex] = {start: startIndex, end: endIndex, ring: [start, end]};
       }
+      
+      // 记录边界点使用情况
+      if (isStartBoundary) {
+        boundaryPoints.set(start.toString(), (boundaryPoints.get(start.toString()) || 0) + 1);
+      }
+      if (isEndBoundary) {
+        boundaryPoints.set(end.toString(), (boundaryPoints.get(end.toString()) || 0) + 1);
+      }
+    }
+
+    // 边界点判断
+    function isBoundaryPoint(p) {
+      return p[0] <= 0 || p[0] >= dx - 1 || p[1] <= 0 || p[1] >= dy - 1;
+    }
+
+    // 网格对齐
+    function snapToGrid(p) {
+      const gridSize = 1e6; // 提高网格对齐精度
+      return [
+        Math.round(p[0] * gridSize) / gridSize,
+        Math.round(p[1] * gridSize) / gridSize
+      ];
+    }
+
+    function processCase(caseIndex, x, y) {
+      const caseHandler = cases[caseIndex];
+      if (typeof caseHandler === 'function') {
+        // 传递dx作为第四个参数
+        caseHandler(values, x, y, dx).forEach(stitch);
+      } else {
+        caseHandler.forEach(stitch);
+      }
     }
   }
 
@@ -290,337 +377,497 @@ function Contours() {
     return point[0] * 2 + point[1] * (dx + 1) * 4;
   }
 
+  function smooth1(x, v0, v1, value) {
+    const a = value - v0;
+    const b = v1 - v0;
+    const d = isFinite(a) && isFinite(b) ? a / b : Math.sign(a) / Math.sign(b);
+    
+    // 添加边界点扰动
+    const isBoundary = x === Math.floor(x) || x === Math.ceil(x);
+    const epsilon = isBoundary ? (Math.random() * 1e-5 - 5e-6) : 0; // [-5e-6, 5e-6]
+    
+    return isNaN(d) ? x : x + d - 0.5 + epsilon;
+  }
+
   function smoothLinear(ring, values, value) {
-    ring.forEach(function(point) {
+    const boundaryCache = new Map();
+    
+    ring.forEach((point) => {
       var x = point[0],
           y = point[1],
           xt = x | 0,
           yt = y | 0,
           v1 = valid(values[yt * dx + xt]);
+
+      // 边界点检测
+      const isXBoundary = x <= 0 || x >= dx - 1;
+      const isYBoundary = y <= 0 || y >= dy - 1;
+
       if (x > 0 && x < dx && xt === x) {
         point[0] = smooth1(x, valid(values[yt * dx + xt - 1]), v1, value);
+        
+        // 增强边界约束
+        if (isXBoundary || isYBoundary) {
+          const gridKey = `${Math.round(x*1e6)},${Math.round(y*1e6)}`;
+          
+          // 对重复边界点施加旋转扰动
+          if (boundaryCache.has(gridKey)) {
+            const angle = (boundaryCache.get(gridKey) * Math.PI/4) % (2*Math.PI);
+            const r = 1e-5;
+            point[0] += r * Math.cos(angle);
+            point[1] += r * Math.sin(angle);
+            boundaryCache.set(gridKey, boundaryCache.get(gridKey) + 1);
+          } else {
+            boundaryCache.set(gridKey, 1);
+          }
+        }
       }
+      
       if (y > 0 && y < dy && yt === y) {
         point[1] = smooth1(y, valid(values[(yt - 1) * dx + xt]), v1, value);
+
+        // 增强边界约束
+        if (isXBoundary || isYBoundary) {
+          const gridKey = `${Math.round(x*1e6)},${Math.round(y*1e6)}`;
+          
+          // 对重复边界点施加旋转扰动
+          if (boundaryCache.has(gridKey)) {
+            const angle = (boundaryCache.get(gridKey) * Math.PI/4) % (2*Math.PI);
+            const r = 1e-5;
+            point[0] += r * Math.cos(angle);
+            point[1] += r * Math.sin(angle);
+            boundaryCache.set(gridKey, boundaryCache.get(gridKey) + 1);
+          } else {
+            boundaryCache.set(gridKey, 1);
+          }
+        }
+      }
+    });
+
+    // 后处理：移除相邻重复点
+    for (let i = ring.length - 1; i >= 0; i--) {
+      const prev = ring[(i - 1 + ring.length) % ring.length];
+      const curr = ring[i];
+      if (distance(prev, curr) < 1e-8) {
+        ring.splice(i, 1);
+      }
+    }
+  }
+
+  // 新增辅助函数
+  function distance(a, b) {
+    return Math.hypot(a[0]-b[0], a[1]-b[1]);
+  }
+
+  // 将smoothLinearDual移动到contours函数外部
+  function smoothLinearDual(ring, values, value) {
+    var point, x, y, x1, y1;
+
+    // The first step in Dual Marching Squares smoothing is linear interpolation.
+    smoothLinear(ring, values, value);
+
+    for (var i = 0; i < ring.length; i++) {
+      point = ring[i];
+      x = point[0];
+      y = point[1];
+
+      if (i < ring.length - 1) {
+        // Next point
+        x1 = ring[i + 1][0];
+        y1 = ring[i + 1][1];
+
+        // Set the current point to the midpoint between it and the next point.
+        point[0] = x + (x1 - x) / 2;
+        point[1] = y + (y1 - y) / 2;
+      } else  {
+        // This is the last point, complete the ring by matching the first point
+        point[0] = ring[0][0];
+        point[1] = ring[0][1];
+      }
+    }
+  }
+
+  // 添加smoothBilinear
+  function smoothBilinear(ring, values, value) {
+    ring.forEach(function(point) {
+      var x = point[0],
+          y = point[1],
+          xt = Math.floor(x),
+          yt = Math.floor(y),
+          fx = x - xt,
+          fy = y - yt;
+          
+      // 获取网格四个角点值(如果在边界内)
+      if (x > 0 && x < dx-1 && y > 0 && y < dy-1) {
+        // 获取四个角点值
+        var v00 = valid(values[yt * dx + xt]),
+            v10 = valid(values[yt * dx + xt + 1]),
+            v01 = valid(values[(yt + 1) * dx + xt]),
+            v11 = valid(values[(yt + 1) * dx + xt + 1]);
+            
+        // 水平方向插值
+        var vx0 = v00 * (1 - fx) + v10 * fx,
+            vx1 = v01 * (1 - fx) + v11 * fx;
+            
+        // 垂直方向插值
+        var vxy = vx0 * (1 - fy) + vx1 * fy;
+        
+        // 计算梯度
+        var gradX = (v10 - v00) * (1 - fy) + (v11 - v01) * fy,
+            gradY = (v01 - v00) * (1 - fx) + (v11 - v10) * fx;
+        
+        // 如果插值结果接近目标值，不调整点位置
+        if (Math.abs(vxy - value) < 1e-6) ; else {
+          // 沿着梯度方向调整点位置
+          var diff = value - vxy;
+          var gradMag = Math.sqrt(gradX * gradX + gradY * gradY);
+          
+          // 防止除以零
+          if (gradMag > 1e-10) {
+            // 限制调整步长，以避免过度调整
+            var maxStep = 0.5;
+            var step = Math.min(Math.abs(diff) / gradMag, maxStep) * Math.sign(diff);
+            
+            // 沿梯度方向移动点
+            point[0] += step * gradX / gradMag;
+            point[1] += step * gradY / gradMag;
+            
+            // 确保点仍在网格单元内
+            point[0] = Math.max(xt, Math.min(xt + 1, point[0]));
+            point[1] = Math.max(yt, Math.min(yt + 1, point[1]));
+          }
+        }
+      } else {
+        // 边界点使用原始线性插值
+        var v1 = valid(values[yt * dx + xt]);
+        if (x > 0 && x < dx && xt === x) {
+          point[0] = smooth1(x, valid(values[yt * dx + xt - 1]), v1, value);
+        }
+        if (y > 0 && y < dy && yt === y) {
+          point[1] = smooth1(y, valid(values[(yt - 1) * dx + xt]), v1, value);
+        }
+      }
+      
+      // 添加边界梯度约束
+      const isXBoundary = x <= 0 || x >= dx - 1;
+      const isYBoundary = y <= 0 || y >= dy - 1;
+      if (isXBoundary || isYBoundary) {
+        const grad = estimateBoundaryGradient(xt, yt, x, y, values, dx, dy);
+        point[0] += grad[0] * 0.1;
+        point[1] += grad[1] * 0.1;
       }
     });
   }
 
-
-    /**
-   * Applies smoothing to an iso-ring according to the Dual Marching Squares algorithm.
-   * @param {[number, number][]} ring The sorted list of (x,y) coordinates of points for a given iso-ring.
-   * @param {number[]} values The underlying grid values.
-   * @param {number} value The iso-value for this iso-ring.
-   */
-    function smoothLinearDual(ring, values, value) {
-      var point, x, y, x1, y1;
-  
-      // The first step in Dual Marching Squares smoothing is linear interpolation.
-      smoothLinear(ring, values, value);
-  
-      for (var i = 0; i < ring.length; i++) {
-        point = ring[i];
-        x = point[0];
-        y = point[1];
-  
-        if (i < ring.length - 1) {
-          // Next point
-          x1 = ring[i + 1][0];
-          y1 = ring[i + 1][1];
-  
-          // Set the current point to the midpoint between it and the next point.
-          point[0] = x + (x1 - x) / 2;
-          point[1] = y + (y1 - y) / 2;
-        } else  {
-          // This is the last point, complete the ring by matching the first point
-          point[0] = ring[0][0];
-          point[1] = ring[0][1];
-        }
-      }
+  function estimateBoundaryGradient(xt, yt, x, y, values, dx, dy) {
+    // 实现边界梯度估计
+    let gradX = 0, gradY = 0;
+    
+    // 水平方向梯度
+    if (x === 0) { // 左边界
+      gradX = values[yt * dx + (xt + 1)] - values[yt * dx + xt];
+    } else if (x === dx - 1) { // 右边界
+      gradX = values[yt * dx + xt] - values[yt * dx + (xt - 1)];
+    } else { // 内部
+      gradX = (values[yt * dx + (xt + 1)] - values[yt * dx + (xt - 1)]) / 2;
     }
-  // 添加smoothBilinear
-function smoothBilinear(ring, values, value) {
-  ring.forEach(function(point) {
-    var x = point[0],
-        y = point[1],
-        xt = Math.floor(x),
-        yt = Math.floor(y),
-        fx = x - xt,
-        fy = y - yt;
-        
-    // 获取网格四个角点值(如果在边界内)
-    if (x > 0 && x < dx-1 && y > 0 && y < dy-1) {
-      // 获取四个角点值
-      var v00 = valid(values[yt * dx + xt]),
-          v10 = valid(values[yt * dx + xt + 1]),
-          v01 = valid(values[(yt + 1) * dx + xt]),
-          v11 = valid(values[(yt + 1) * dx + xt + 1]);
-          
-      // 水平方向插值
-      var vx0 = v00 * (1 - fx) + v10 * fx,
-          vx1 = v01 * (1 - fx) + v11 * fx;
-          
-      // 垂直方向插值
-      var vxy = vx0 * (1 - fy) + vx1 * fy;
+
+    // 垂直方向梯度
+    if (y === 0) { // 上边界
+      gradY = values[(yt + 1) * dx + xt] - values[yt * dx + xt];
+    } else if (y === dy - 1) { // 下边界
+      gradY = values[yt * dx + xt] - values[(yt - 1) * dx + xt];
+    } else { // 内部
+      gradY = (values[(yt + 1) * dx + xt] - values[(yt - 1) * dx + xt]) / 2;
+    }
+
+    // 归一化梯度
+    const magnitude = Math.sqrt(gradX * gradX + gradY * gradY);
+    return magnitude > 1e-6 
+      ? [gradX / magnitude, gradY / magnitude]
+      : [0, 0];
+  }
+
+  // 删除现有的smoothSpline函数，用新的基于Catmull-Rom的实现替代
+  function smoothSpline(ring, values, value, tension = 0.5) {
+    // 首先应用线性插值来获得准确的等值线位置
+    smoothLinear(ring, values, value);
+    
+    // 如果点数太少，直接返回
+    if (ring.length < 3) return;
+    
+    // 判断是否为闭合环（area不为0表示闭合环）
+    const closed = area(ring) !== 0;
+    
+    // 创建点的副本，避免直接修改原始点
+    const points = ring.map(p => [p[0], p[1]]);
+    const n = points.length;
+    
+    // 计算所有点的切线向量（用于贝塞尔曲线控制点）
+    const tangents = [];
+    
+    if (closed) {
+      // 闭合曲线：首先计算最后一个点的切线（连接最后一点、第一点和第二点）
+      tangents.push(calculateTangent(
+        points[n-1], points[0], points[1], tension
+      ));
       
-      // 计算梯度
-      var gradX = (v10 - v00) * (1 - fy) + (v11 - v01) * fy,
-          gradY = (v01 - v00) * (1 - fx) + (v11 - v10) * fx;
-      
-      // 如果插值结果接近目标值，不调整点位置
-      if (Math.abs(vxy - value) < 1e-6) ; else {
-        // 沿着梯度方向调整点位置
-        var diff = value - vxy;
-        var gradMag = Math.sqrt(gradX * gradX + gradY * gradY);
-        
-        // 防止除以零
-        if (gradMag > 1e-10) {
-          // 限制调整步长，以避免过度调整
-          var maxStep = 0.5;
-          var step = Math.min(Math.abs(diff) / gradMag, maxStep) * Math.sign(diff);
-          
-          // 沿梯度方向移动点
-          point[0] += step * gradX / gradMag;
-          point[1] += step * gradY / gradMag;
-          
-          // 确保点仍在网格单元内
-          point[0] = Math.max(xt, Math.min(xt + 1, point[0]));
-          point[1] = Math.max(yt, Math.min(yt + 1, point[1]));
-        }
+      // 计算中间点的切线
+      for (let i = 1; i < n; i++) {
+        tangents.push(calculateTangent(
+          points[i-1], points[i], points[(i+1) % n], tension
+        ));
       }
     } else {
-      // 边界点使用原始线性插值
-      var v1 = valid(values[yt * dx + xt]);
-      if (x > 0 && x < dx && xt === x) {
-        point[0] = smooth1(x, valid(values[yt * dx + xt - 1]), v1, value);
-      }
-      if (y > 0 && y < dy && yt === y) {
-        point[1] = smooth1(y, valid(values[(yt - 1) * dx + xt]), v1, value);
-      }
-    }
-  });
-}
-
-// 删除现有的smoothSpline函数，用新的基于Catmull-Rom的实现替代
-function smoothSpline(ring, values, value, tension = 0.5) {
-  // 首先应用线性插值来获得准确的等值线位置
-  smoothLinear(ring, values, value);
-  
-  // 如果点数太少，直接返回
-  if (ring.length < 3) return;
-  
-  // 判断是否为闭合环（area不为0表示闭合环）
-  const closed = area(ring) !== 0;
-  
-  // 创建点的副本，避免直接修改原始点
-  const points = ring.map(p => [p[0], p[1]]);
-  const n = points.length;
-  
-  // 计算所有点的切线向量（用于贝塞尔曲线控制点）
-  const tangents = [];
-  
-  if (closed) {
-    // 闭合曲线：首先计算最后一个点的切线（连接最后一点、第一点和第二点）
-    tangents.push(calculateTangent(
-      points[n-1], points[0], points[1], tension
-    ));
-    
-    // 计算中间点的切线
-    for (let i = 1; i < n; i++) {
-      tangents.push(calculateTangent(
-        points[i-1], points[i], points[(i+1) % n], tension
+      // 开放曲线：对第一个点使用特殊处理
+      tangents.push(calculateEndpointTangent(
+        points[0], points[1], tension, true
       ));
-    }
-  } else {
-    // 开放曲线：对第一个点使用特殊处理
-    tangents.push(calculateEndpointTangent(
-      points[0], points[1], tension, true
-    ));
-    
-    // 计算中间点的切线
-    for (let i = 1; i < n-1; i++) {
-      tangents.push(calculateTangent(
-        points[i-1], points[i], points[i+1], tension
+      
+      // 计算中间点的切线
+      for (let i = 1; i < n-1; i++) {
+        tangents.push(calculateTangent(
+          points[i-1], points[i], points[i+1], tension
+        ));
+      }
+      
+      // 对最后一个点使用特殊处理
+      tangents.push(calculateEndpointTangent(
+        points[n-1], points[n-2], tension, false
       ));
     }
     
-    // 对最后一个点使用特殊处理
-    tangents.push(calculateEndpointTangent(
-      points[n-1], points[n-2], tension, false
-    ));
-  }
-  
-  // 创建新的平滑点集合
-  const smoothedPoints = [];
-  
-  if (closed) {
-    // 闭合曲线：使用三次贝塞尔曲线连接所有点
-    for (let i = 0; i < n; i++) {
-      const p0 = points[i];
-      const p1 = points[(i+1) % n];
-      const t0 = tangents[i];
-      const t1 = tangents[(i+1) % n];
+    // 创建新的平滑点集合
+    const smoothedPoints = [];
+    
+    if (closed) {
+      // 闭合曲线：使用三次贝塞尔曲线连接所有点
+      for (let i = 0; i < n; i++) {
+        const p0 = points[i];
+        const p1 = points[(i+1) % n];
+        const t0 = tangents[i];
+        const t1 = tangents[(i+1) % n];
+        
+        // 添加当前点
+        smoothedPoints.push([...p0]);
+        
+        // 添加两个控制点和下一个点的贝塞尔段
+        const cp1 = [p0[0] + t0[1][0], p0[1] + t0[1][1]];
+        const cp2 = [p1[0] - t1[0][0], p1[1] - t1[0][1]];
+        
+        // 只为非最后一点添加贝塞尔段（避免重复）
+        if (i < n-1 || !closed) {
+          addBezierSegment(smoothedPoints, cp1, cp2, p1);
+        }
+      }
       
-      // 添加当前点
-      smoothedPoints.push([...p0]);
+      // 确保闭合
+      if (closed) {
+        smoothedPoints.push([...smoothedPoints[0]]);
+      }
+    } else {
+      // 开放曲线：从第一个点开始
+      smoothedPoints.push([...points[0]]);
       
-      // 添加两个控制点和下一个点的贝塞尔段
-      const cp1 = [p0[0] + t0[1][0], p0[1] + t0[1][1]];
-      const cp2 = [p1[0] - t1[0][0], p1[1] - t1[0][1]];
+      // 使用二次贝塞尔曲线连接第一个点和第二个点
+      const cp1 = [
+        points[0][0] + tangents[0][0],
+        points[0][1] + tangents[0][1]
+      ];
+      addQuadraticSegment(smoothedPoints, cp1, points[1]);
       
-      // 只为非最后一点添加贝塞尔段（避免重复）
-      if (i < n-1 || !closed) {
+      // 使用三次贝塞尔曲线连接中间点
+      for (let i = 1; i < n-2; i++) {
+        const p0 = points[i];
+        const p1 = points[i+1];
+        const t0 = tangents[i];
+        const t1 = tangents[i+1];
+        
+        const cp1 = [p0[0] + t0[1][0], p0[1] + t0[1][1]];
+        const cp2 = [p1[0] - t1[0][0], p1[1] - t1[0][1]];
+        
         addBezierSegment(smoothedPoints, cp1, cp2, p1);
       }
+      
+      // 使用二次贝塞尔曲线连接最后两个点
+      if (n > 2) {
+        const pLast = points[n-1];
+        const t = tangents[n-1];
+        
+        const cp = [
+          pLast[0] - t[0],
+          pLast[1] - t[1]
+        ];
+        addQuadraticSegment(smoothedPoints, cp, pLast);
+      }
     }
     
-    // 确保闭合
-    if (closed) {
-      smoothedPoints.push([...smoothedPoints[0]]);
-    }
-  } else {
-    // 开放曲线：从第一个点开始
-    smoothedPoints.push([...points[0]]);
+    // 用平滑点替换原始点
+    ring.length = 0;
+    smoothedPoints.forEach(p => ring.push(p));
+  }
+
+  // 添加一个三次贝塞尔曲线段（控制点cp1、cp2和终点p1）
+  function addBezierSegment(points, cp1, cp2, p1) {
+    // 分段数（越多越平滑，但点也越多）
+    const segments = 4;
     
-    // 使用二次贝塞尔曲线连接第一个点和第二个点
-    const cp1 = [
-      points[0][0] + tangents[0][0],
-      points[0][1] + tangents[0][1]
+    for (let t = 1; t <= segments; t++) {
+      const pct = t / segments;
+      const x = cubicBezier(
+        points[points.length-1][0], cp1[0], cp2[0], p1[0], pct
+      );
+      const y = cubicBezier(
+        points[points.length-1][1], cp1[1], cp2[1], p1[1], pct
+      );
+      points.push([x, y]);
+    }
+  }
+
+  // 添加一个二次贝塞尔曲线段（控制点cp和终点p1）
+  function addQuadraticSegment(points, cp, p1) {
+    // 分段数
+    const segments = 3;
+    
+    for (let t = 1; t <= segments; t++) {
+      const pct = t / segments;
+      const x = quadraticBezier(
+        points[points.length-1][0], cp[0], p1[0], pct
+      );
+      const y = quadraticBezier(
+        points[points.length-1][1], cp[1], p1[1], pct
+      );
+      points.push([x, y]);
+    }
+  }
+
+  // 计算Catmull-Rom样条曲线的切线（返回前后两个控制点）
+  function calculateTangent(p0, p1, p2, tension) {
+    // 计算方向向量
+    const dx1 = p1[0] - p0[0];
+    const dy1 = p1[1] - p0[1];
+    const dx2 = p2[0] - p1[0];
+    const dy2 = p2[1] - p1[1];
+    
+    // 计算分段长度（使用平方根的一半作为权重）
+    const len1 = Math.sqrt(dx1*dx1 + dy1*dy1) / 2;
+    const len2 = Math.sqrt(dx2*dx2 + dy2*dy2) / 2;
+    
+    // 应用Catmull-Rom公式计算切线
+    // 使用张力参数调整平滑度
+    const tension_factor = tension * 0.5;
+    
+    // 防止除以零
+    if (len1 < 1e-10 || len2 < 1e-10) {
+      return [[0, 0], [0, 0]];
+    }
+    
+    // 计算标准化的切线向量
+    const tx = (dx1/len1 + dx2/len2) * tension_factor;
+    const ty = (dy1/len1 + dy2/len2) * tension_factor;
+    
+    // 返回前后两个控制点的相对位置
+    return [
+      [tx * len1, ty * len1],  // 用于p1的前控制点
+      [tx * len2, ty * len2]   // 用于p1的后控制点
     ];
-    addQuadraticSegment(smoothedPoints, cp1, points[1]);
+  }
+
+  // 为开放曲线的端点计算切线
+  function calculateEndpointTangent(p, pOther, tension, isStart) {
+    const dx = pOther[0] - p[0];
+    const dy = pOther[1] - p[1];
+    const len = Math.sqrt(dx*dx + dy*dy);
     
-    // 使用三次贝塞尔曲线连接中间点
-    for (let i = 1; i < n-2; i++) {
-      const p0 = points[i];
-      const p1 = points[i+1];
-      const t0 = tangents[i];
-      const t1 = tangents[i+1];
-      
-      const cp1 = [p0[0] + t0[1][0], p0[1] + t0[1][1]];
-      const cp2 = [p1[0] - t1[0][0], p1[1] - t1[0][1]];
-      
-      addBezierSegment(smoothedPoints, cp1, cp2, p1);
+    if (len < 1e-10) return [0, 0];
+    
+    // 对端点使用较小的张力系数
+    const tension_factor = tension * 0.3;
+    
+    // 标准化并缩放
+    const tx = (dx / len) * tension_factor * len;
+    const ty = (dy / len) * tension_factor * len;
+    
+    // 如果是起点，返回正向切线；如果是终点，返回负向切线
+    return isStart ? [tx, ty] : [-tx, -ty];
+  }
+
+  // 三次贝塞尔曲线插值
+  function cubicBezier(p0, p1, p2, p3, t) {
+    const t2 = t * t;
+    const t3 = t2 * t;
+    const mt = 1 - t;
+    const mt2 = mt * mt;
+    const mt3 = mt2 * mt;
+    return p0 * mt3 + 3 * p1 * mt2 * t + 3 * p2 * mt * t2 + p3 * t3;
+  }
+
+  // 二次贝塞尔曲线插值
+  function quadraticBezier(p0, p1, p2, t) {
+    const mt = 1 - t;
+    return p0 * mt * mt + 2 * p1 * mt * t + p2 * t * t;
+  }
+
+  // 新增Douglas-Peucker算法实现
+  function simplifyRing(ring, epsilon) {
+    if (ring.length < 3) return ring;
+    
+    const start = ring[0];
+    const end = ring[ring.length-1];
+    let maxDist = 0;
+    let index = 0;
+    
+    // 找到离线段最远的点
+    for (let i = 1; i < ring.length - 1; i++) {
+      const dist = perpendicularDistance(ring[i], start, end);
+      if (dist > maxDist) {
+        maxDist = dist;
+        index = i;
+      }
     }
     
-    // 使用二次贝塞尔曲线连接最后两个点
-    if (n > 2) {
-      const pLast = points[n-1];
-      const t = tangents[n-1];
-      
-      const cp = [
-        pLast[0] - t[0],
-        pLast[1] - t[1]
-      ];
-      addQuadraticSegment(smoothedPoints, cp, pLast);
+    // 递归简化
+    if (maxDist > epsilon) {
+      const left = simplifyRing(ring.slice(0, index + 1), epsilon);
+      const right = simplifyRing(ring.slice(index), epsilon);
+      return left.slice(0, -1).concat(right);
     }
+    
+    return [start, end];
   }
-  
-  // 用平滑点替换原始点
-  ring.length = 0;
-  smoothedPoints.forEach(p => ring.push(p));
-}
 
-// 添加一个三次贝塞尔曲线段（控制点cp1、cp2和终点p1）
-function addBezierSegment(points, cp1, cp2, p1) {
-  // 分段数（越多越平滑，但点也越多）
-  const segments = 4;
-  
-  for (let t = 1; t <= segments; t++) {
-    const pct = t / segments;
-    const x = cubicBezier(
-      points[points.length-1][0], cp1[0], cp2[0], p1[0], pct
+  function perpendicularDistance(point, lineStart, lineEnd) {
+    const area = Math.abs(
+      (lineEnd[0] - lineStart[0]) * (lineStart[1] - point[1]) -
+      (lineStart[0] - point[0]) * (lineEnd[1] - lineStart[1])
     );
-    const y = cubicBezier(
-      points[points.length-1][1], cp1[1], cp2[1], p1[1], pct
-    );
-    points.push([x, y]);
+    const lineLength = Math.hypot(lineEnd[0] - lineStart[0], lineEnd[1] - lineStart[1]);
+    return lineLength === 0 ? 0 : area / lineLength;
   }
-}
 
-// 添加一个二次贝塞尔曲线段（控制点cp和终点p1）
-function addQuadraticSegment(points, cp, p1) {
-  // 分段数
-  const segments = 3;
-  
-  for (let t = 1; t <= segments; t++) {
-    const pct = t / segments;
-    const x = quadraticBezier(
-      points[points.length-1][0], cp[0], p1[0], pct
-    );
-    const y = quadraticBezier(
-      points[points.length-1][1], cp[1], p1[1], pct
-    );
-    points.push([x, y]);
+  // 新增孔洞处理逻辑
+  function processHole(hole, polygons, holes) {
+    // 寻找包含此孔洞的最小多边形
+    for (let i = 0; i < polygons.length; i++) {
+      const polygon = polygons[i];
+      if (contains(polygon[0], hole) === 1) {
+        // 检查是否被其他孔洞包含
+        let isNested = false;
+        for (const otherHole of polygon.slice(1)) {
+          if (contains(otherHole, hole) === 1) {
+            isNested = true;
+            break;
+          }
+        }
+        if (!isNested) {
+          polygon.push(hole);
+          return;
+        }
+      }
+    }
+    // 作为新多边形的孔洞
+    holes.push(hole);
   }
-}
-
-// 计算Catmull-Rom样条曲线的切线（返回前后两个控制点）
-function calculateTangent(p0, p1, p2, tension) {
-  // 计算方向向量
-  const dx1 = p1[0] - p0[0];
-  const dy1 = p1[1] - p0[1];
-  const dx2 = p2[0] - p1[0];
-  const dy2 = p2[1] - p1[1];
-  
-  // 计算分段长度（使用平方根的一半作为权重）
-  const len1 = Math.sqrt(dx1*dx1 + dy1*dy1) / 2;
-  const len2 = Math.sqrt(dx2*dx2 + dy2*dy2) / 2;
-  
-  // 应用Catmull-Rom公式计算切线
-  // 使用张力参数调整平滑度
-  const tension_factor = tension * 0.5;
-  
-  // 防止除以零
-  if (len1 < 1e-10 || len2 < 1e-10) {
-    return [[0, 0], [0, 0]];
-  }
-  
-  // 计算标准化的切线向量
-  const tx = (dx1/len1 + dx2/len2) * tension_factor;
-  const ty = (dy1/len1 + dy2/len2) * tension_factor;
-  
-  // 返回前后两个控制点的相对位置
-  return [
-    [tx * len1, ty * len1],  // 用于p1的前控制点
-    [tx * len2, ty * len2]   // 用于p1的后控制点
-  ];
-}
-
-// 为开放曲线的端点计算切线
-function calculateEndpointTangent(p, pOther, tension, isStart) {
-  const dx = pOther[0] - p[0];
-  const dy = pOther[1] - p[1];
-  const len = Math.sqrt(dx*dx + dy*dy);
-  
-  if (len < 1e-10) return [0, 0];
-  
-  // 对端点使用较小的张力系数
-  const tension_factor = tension * 0.3;
-  
-  // 标准化并缩放
-  const tx = (dx / len) * tension_factor * len;
-  const ty = (dy / len) * tension_factor * len;
-  
-  // 如果是起点，返回正向切线；如果是终点，返回负向切线
-  return isStart ? [tx, ty] : [-tx, -ty];
-}
-
-// 三次贝塞尔曲线插值
-function cubicBezier(p0, p1, p2, p3, t) {
-  const t2 = t * t;
-  const t3 = t2 * t;
-  const mt = 1 - t;
-  const mt2 = mt * mt;
-  const mt3 = mt2 * mt;
-  return p0 * mt3 + 3 * p1 * mt2 * t + 3 * p2 * mt * t2 + p3 * t3;
-}
-
-// 二次贝塞尔曲线插值
-function quadraticBezier(p0, p1, p2, t) {
-  const mt = 1 - t;
-  return p0 * mt * mt + 2 * p1 * mt * t + p2 * t * t;
-}
 
   contours.contour = contour;
 
@@ -640,20 +887,20 @@ function quadraticBezier(p0, p1, p2, t) {
   // };
 
   // 修改contours.smooth方法
-contours.smooth = function(_) {
-  return arguments.length 
-    ? (smooth = _ === true ? smoothLinear : 
-               _ === "linearDual" ? smoothLinearDual : 
-               _ === "bilinear" ? smoothBilinear : 
-               _ === "spline" ? smoothSpline :
-               _ === false ? noop : _, 
-       contours) 
-    : smooth === smoothLinear ? true : 
-      smooth === smoothBilinear ? "bilinear" : 
-      smooth === smoothLinearDual ? "linearDual" : 
-      smooth === smoothSpline ? "spline" :
-      false;
-};
+  contours.smooth = function(_) {
+    return arguments.length 
+      ? (smooth = _ === true ? smoothLinear : 
+                 _ === "linearDual" ? smoothLinearDual : 
+                 _ === "bilinear" ? smoothBilinear : 
+                 _ === "spline" ? smoothSpline :
+                 _ === false ? noop : _, 
+           contours) 
+      : smooth === smoothLinear ? true : 
+        smooth === smoothBilinear ? "bilinear" : 
+        smooth === smoothLinearDual ? "linearDual" : 
+        smooth === smoothSpline ? "spline" :
+        false;
+  };
 
   // 添加connectGaps方法
   contours.connectGaps = function(_) {
@@ -663,6 +910,11 @@ contours.smooth = function(_) {
   // 添加smoothTension方法
   contours.smoothTension = function(_) {
     return arguments.length ? (smoothTension = +_, contours) : smoothTension;
+  };
+
+  // 新增简化阈值设置方法
+  contours.simplify = function(_) {
+    return arguments.length ? (simplifyThreshold = +_, contours) : simplifyThreshold;
   };
 
   return contours;
@@ -682,13 +934,6 @@ function above(x, value) {
 // During smoothing, treat any invalid value as negative infinity.
 function valid(v) {
   return v == null || isNaN(v = +v) ? -Infinity : v;
-}
-
-function smooth1(x, v0, v1, value) {
-  const a = value - v0;
-  const b = v1 - v0;
-  const d = isFinite(a) || isFinite(b) ? a / b : Math.sign(a) / Math.sign(b);
-  return isNaN(d) ? x : x + d - 0.5;
 }
 
 function defaultX(d) {

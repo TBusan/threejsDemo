@@ -161,7 +161,10 @@
 			const contourGenerator = ztContours()
 				.size([gridSizeX, gridSizeY])
 				.thresholds(specificThresholds)
-				.smooth(true); // 启用平滑处理  //'linearDual'  'bilinear'
+				.smooth(true)
+				// .smooth("spline")
+				// .smoothTension(0.2)
+				//  // 启用平滑处理  //'linearDual'  'bilinear'  	.smooth('linearDual')
 				
 			// 预处理数据，确保NaN值被正确处理
 			function handleNullInGrid(gridData) {
