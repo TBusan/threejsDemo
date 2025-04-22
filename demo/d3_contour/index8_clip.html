@@ -36,43 +36,35 @@
 				height: 30px;
 				position: relative;
 			}
-			#app {
-				width: 100%;
-				height: 100vh;
-				overflow: hidden;
-				position: relative;
+			.axis-label {
+				color: white;
+				font-size: 10px;
+				background: rgba(0, 0, 0, 0.6);
+				padding: 2px 4px;
+				border-radius: 2px;
+				white-space: nowrap;
+				pointer-events: none;
 			}
-			#map {
+			#message {
 				position: absolute;
-				top: 0;
-				left: 0;
-				bottom: 0;
-				right: 0;
-				z-index: 999;
+				bottom: 20px;
+				left: 50%;
+				transform: translateX(-50%);
+				background: rgba(0, 0, 0, 0.7);
+				color: white;
+				padding: 10px;
+				border-radius: 5px;
+				font-family: Arial, sans-serif;
+				opacity: 0;
+				transition: opacity 0.3s ease;
 			}
-			#compass-container {
-				position: absolute;
-				left: 30px;
-				bottom: 50px;
-				height: 60px;
-				width: 60px;
+			#message.visible {
+				opacity: 1;
 			}
 		</style>
 	</head>
 	<body>
 		<div id="info">D3等值线数据 + Three.js渲染</div>
-		<div id="app">
-			<div class="app-title">three-tile v<span id="version"></span> demo</div>
-			<pre id="debug">Debug</pre>
-
-			<div id="map"></div>
-			<div id="compass-container"></div>
-			<div class="statusbar">
-				<div id="attribution"></div>
-				<div id="loading">loading</div>
-				<div id="location">local</div>
-			</div>
-		</div>
 		<div id="controls">
 			<div>
 				<label
@@ -83,16 +75,18 @@
 					/>显示等值线轮廓</label
 				>
 			</div>
+			<div>
+				<button id="activateClipping">激活裁切功能</button>
+			</div>
 		</div>
 		<div id="container"></div>
+		<div id="message"></div>
 
 		<script type="importmap">
 			{
 				"imports": {
 					"three": "../../build/three.module.js",
-					"three/addons/": "../../examples/jsm/",
-					"three-tile": "../../threetiles/tile.js",
-					"three-tile-plugin": "../../threetiles/plugin.js"
+					"three/addons/": "../../examples/jsm/"
 				}
 			}
 		</script>
@@ -101,16 +95,273 @@
 			// 导入必要的库
 			import * as THREE from "three";
 			import { OrbitControls } from "three/addons/controls/OrbitControls.js";
+			import { CSS2DRenderer, CSS2DObject } from "three/addons/renderers/CSS2DRenderer.js";
 			import Stats from "three/addons/libs/stats.module.js";
 			import { contourData } from "./contourData2.js";
 			import { contours as ztContours, contourDensity } from "./d3_zoutao.js";
-			import * as source from "../../threetiles/mapSource.js";
-			import * as tt from "three-tile";
-			import * as plugin from "three-tile-plugin";
-			// import { createMap, initViewer, fly } from "./map.js";
 			// ===== D3.js 部分：生成等值线数据 =====
+			// 配置参数
+			const width = 800;
+			const height = 600;
+			const aspectRatio = width / height;
 
-			// 初始化地图////////////////////////////////////////////////////////////
+			// 控制参数
+			let showContourLines = true; // 显示等值线轮廓
+			let showContourLabels = false; // 显示等值线标注
+
+			// 解析contourData数据
+			const dataX = contourData.data.x; // X坐标数组
+			const dataY = contourData.data.y; // Y坐标数组
+			const dataValues = contourData.data.v; // 值的二维数组
+			const zMin = contourData.data.zmin; // 最小值
+			const zMax = contourData.data.zmax; // 最大值
+
+			// 获取数据网格尺寸
+			const gridSizeX = dataX.length;
+			const gridSizeY = dataY.length;
+
+			// 获取实际的数据范围
+			const xMin = d3.min(dataX);
+			const xMax = d3.max(dataX);
+			const yMin = d3.min(dataY);
+			const yMax = d3.max(dataY);
+
+			// 计算数据的真实长宽比
+			const dataAspectRatio = (xMax - xMin) / Math.abs(yMax - yMin);
+
+			console.log(`X范围: ${xMin} 到 ${xMax}, Y范围: ${yMin} 到 ${yMax}`);
+			console.log(`数据长宽比: ${dataAspectRatio.toFixed(2)}`);
+
+			// 计算THREE.js场景中的坐标范围，保持数据比例
+			// 以Y轴为基准，X轴根据实际数据比例调整
+			const sceneHeight = 1.0; // THREE.js场景中y轴的总高度
+			const sceneWidth = sceneHeight * dataAspectRatio; // 按数据比例计算x轴宽度
+
+			// 调整相机位置以适应新的场景比例
+			const cameraDistance = Math.max(dataAspectRatio, 2) * 1.2; // 确保能看到整个场景
+
+			// ===== Three.js 部分：3D 渲染 =====
+			const scene = new THREE.Scene();
+			scene.background = new THREE.Color('#ffffff');
+
+			// 设置摄像机
+			const camera = new THREE.PerspectiveCamera(
+				60,
+				window.innerWidth / window.innerHeight,
+				0.1,
+				1000
+			);
+			camera.position.set(0, 0, cameraDistance);
+
+			// 创建渲染器
+			const renderer = new THREE.WebGLRenderer({
+				antialias: true,
+				logarithmicDepthBuffer: true, // 启用对数深度缓冲解决Z-fighting
+			});
+			renderer.setPixelRatio(window.devicePixelRatio);
+			renderer.sortObjects = true;
+			renderer.setSize(window.innerWidth, window.innerHeight);
+			// 启用裁切功能
+			renderer.localClippingEnabled = true;
+			document.getElementById("container").appendChild(renderer.domElement);
+
+			// 创建CSS2D渲染器用于标签
+			const labelRenderer = new CSS2DRenderer();
+			labelRenderer.setSize(window.innerWidth, window.innerHeight);
+			labelRenderer.domElement.style.position = 'absolute';
+			labelRenderer.domElement.style.top = '0';
+			labelRenderer.domElement.style.left = '0';
+			labelRenderer.domElement.style.pointerEvents = 'none';
+			document.getElementById("container").appendChild(labelRenderer.domElement);
+
+			// 添加轨道控制
+			const controls = new OrbitControls(camera, renderer.domElement);
+			controls.enableDamping = true;
+			controls.dampingFactor = 0.25;
+
+			// 添加性能监视器
+			const stats = new Stats();
+			stats.domElement.style.position = "absolute";
+			stats.domElement.style.top = "0px";
+			document.getElementById("container").appendChild(stats.domElement);
+
+			// 添加光源
+			const ambientLight = new THREE.AmbientLight(0xffffff, 0.6);
+			scene.add(ambientLight);
+
+			const directionalLight = new THREE.DirectionalLight(0xffffff, 0.8);
+			directionalLight.position.set(1, 1, 1);
+			scene.add(directionalLight);
+			
+			// 添加以原点为中心的坐标轴辅助对象
+			const axesSize = Math.max(sceneWidth, sceneHeight) * 0.5; // 坐标轴尺寸
+			const axesHelper = new THREE.AxesHelper(axesSize);
+			// 设置轴线颜色 - x轴红色，y轴绿色，z轴蓝色
+			axesHelper.setColors(
+				new THREE.Color(0xff0000), // X轴 - 红色
+				new THREE.Color(0x00ff00), // Y轴 - 绿色
+				new THREE.Color(0x0000ff)  // Z轴 - 蓝色
+			);
+			// 将坐标轴放置在原点(0,0,0)
+			axesHelper.position.set(0, 0, 0);
+			scene.add(axesHelper);
+			
+			// 添加网格辅助对象以更好地展示水平面
+			const gridHelper = new THREE.GridHelper(axesSize * 2, 10, 0x444444, 0x333333);
+			gridHelper.rotation.x = Math.PI / 2; // 旋转到XY平面
+			// 将网格放置在原点(0,0,0)
+			gridHelper.position.set(0, 0, 0);
+			scene.add(gridHelper);
+			
+			// 在原点添加一个100*40的平面
+			const planeGeometry = new THREE.PlaneGeometry(152, 29.874);
+			const planeMaterial = new THREE.MeshBasicMaterial({
+				color: 0xccccff,
+				transparent: true,
+				opacity: 0.3,
+				side: THREE.DoubleSide
+			});
+			const plane = new THREE.Mesh(planeGeometry, planeMaterial);
+			plane.position.set(79, 0, 0);
+			scene.add(plane);
+			
+			// 创建坐标轴刻度和标签
+			function createAxisTicks() {
+				const ticksGroup = new THREE.Group();
+				
+				// 定义刻度数量
+				const tickCount = 5;
+				
+				// 创建X轴刻度
+				const xTickStep = (xMax - xMin) / (tickCount - 1);
+				for (let i = 0; i < tickCount; i++) {
+					const xValue = xMin + i * xTickStep;
+					// 直接使用原始数据值作为位置
+					const xPos = xValue;
+					
+					// 创建刻度线
+					const tickGeometry = new THREE.BufferGeometry().setFromPoints([
+						new THREE.Vector3(xPos, -2, 0),
+						new THREE.Vector3(xPos, 2, 0)
+					]);
+					const tickMaterial = new THREE.LineBasicMaterial({ color: 0xff0000 });
+					const tick = new THREE.Line(tickGeometry, tickMaterial);
+					ticksGroup.add(tick);
+					
+					// 创建文本标签
+					const labelDiv = document.createElement('div');
+					labelDiv.className = 'axis-label';
+					labelDiv.textContent = xValue.toFixed(1);
+					labelDiv.style.color = '#ff0000';
+					
+					const label = new CSS2DObject(labelDiv);
+					label.position.set(xPos, -5, 0);
+					ticksGroup.add(label);
+				}
+				
+				// 创建Y轴刻度
+				const yTickStep = (yMax - yMin) / (tickCount - 1);
+				for (let i = 0; i < tickCount; i++) {
+					const yValue = yMin + i * yTickStep;
+					// 直接使用原始数据值作为位置
+					const yPos = yValue;
+					
+					// 创建刻度线
+					const tickGeometry = new THREE.BufferGeometry().setFromPoints([
+						new THREE.Vector3(-2, yPos, 0),
+						new THREE.Vector3(2, yPos, 0)
+					]);
+					const tickMaterial = new THREE.LineBasicMaterial({ color: 0x00ff00 });
+					const tick = new THREE.Line(tickGeometry, tickMaterial);
+					ticksGroup.add(tick);
+					
+					// 创建文本标签
+					const labelDiv = document.createElement('div');
+					labelDiv.className = 'axis-label';
+					labelDiv.textContent = yValue.toFixed(1);
+					labelDiv.style.color = '#00ff00';
+					
+					const label = new CSS2DObject(labelDiv);
+					label.position.set(-5, yPos, 0);
+					ticksGroup.add(label);
+				}
+				
+				// 创建Z轴刻度 (值的范围)
+				const zTickStep = (zMax - zMin) / (tickCount - 1);
+				for (let i = 0; i < tickCount; i++) {
+					const zValue = zMin + i * zTickStep;
+					// 直接使用原始数据值作为位置，但Z轴需要适当缩放
+					const zPos = zValue / 100; // 缩放以保持可见性
+					
+					// 创建刻度线
+					const tickGeometry = new THREE.BufferGeometry().setFromPoints([
+						new THREE.Vector3(-2, 0, zPos),
+						new THREE.Vector3(2, 0, zPos)
+					]);
+					const tickMaterial = new THREE.LineBasicMaterial({ color: 0x0000ff });
+					const tick = new THREE.Line(tickGeometry, tickMaterial);
+					ticksGroup.add(tick);
+					
+					// 创建文本标签
+					const labelDiv = document.createElement('div');
+					labelDiv.className = 'axis-label';
+					labelDiv.textContent = zValue.toFixed(1);
+					labelDiv.style.color = '#0000ff';
+					
+					const label = new CSS2DObject(labelDiv);
+					label.position.set(-5, 0, zPos);
+					ticksGroup.add(label);
+				}
+				
+				// 添加坐标轴标题
+				function createAxisLabel(text, position, color) {
+					const labelDiv = document.createElement('div');
+					labelDiv.className = 'axis-label';
+					labelDiv.textContent = text;
+					labelDiv.style.color = color;
+					labelDiv.style.fontWeight = 'bold';
+					
+					const label = new CSS2DObject(labelDiv);
+					label.position.copy(position);
+					ticksGroup.add(label);
+				}
+				
+				// 添加坐标轴名称
+				const maxValue = Math.max(Math.abs(xMax), Math.abs(yMax), Math.abs(zMax / 100));
+				createAxisLabel('X轴', new THREE.Vector3(maxValue * 1.2, 0, 0), '#ff0000');
+				createAxisLabel('Y轴', new THREE.Vector3(0, maxValue * 1.2, 0), '#00ff00');
+				createAxisLabel('Z轴', new THREE.Vector3(0, 0, maxValue * 0.1), '#0000ff');
+				
+				return ticksGroup;
+			}
+			
+			// 创建并添加刻度标注
+			const axisTicks = createAxisTicks();
+			scene.add(axisTicks);
+			
+			// 添加控制是否显示辅助对象的UI控件
+			const axesCheckbox = document.createElement('input');
+			axesCheckbox.type = 'checkbox';
+			axesCheckbox.id = 'showAxes';
+			axesCheckbox.checked = true;
+			
+			const axesLabel = document.createElement('label');
+			axesLabel.htmlFor = 'showAxes';
+			axesLabel.textContent = '显示坐标轴';
+			
+			const axesDiv = document.createElement('div');
+			axesDiv.appendChild(axesCheckbox);
+			axesDiv.appendChild(axesLabel);
+			
+			document.getElementById('controls').appendChild(axesDiv);
+			
+			// 坐标轴显示控制
+			axesCheckbox.addEventListener('change', (event) => {
+				axesHelper.visible = event.target.checked;
+				gridHelper.visible = event.target.checked;
+				axisTicks.visible = event.target.checked;
+			});
+
 			//===== 等值线类定义 =====
 			class Contour {
 				constructor(options = {}) {
@@ -119,9 +370,9 @@
 						showContourLines: true,
 						showContourLabels: false,
 						smooth: true,
-						...options,
+						...options
 					};
-
+					
 					// 初始化成员变量
 					this.contourData = contourData;
 					this.dataX = this.contourData.data.x; // X坐标数组
@@ -129,54 +380,48 @@
 					this.dataValues = this.contourData.data.v; // 值的二维数组
 					this.zMin = this.contourData.data.zmin; // 最小值
 					this.zMax = this.contourData.data.zmax; // 最大值
-
+					
 					// 获取数据网格尺寸
 					this.gridSizeX = this.dataX.length;
 					this.gridSizeY = this.dataY.length;
-
+					
 					// 获取实际的数据范围
 					this.xMin = d3.min(this.dataX);
 					this.xMax = d3.max(this.dataX);
 					this.yMin = d3.min(this.dataY);
 					this.yMax = d3.max(this.dataY);
-
+					
 					// 计算数据的真实长宽比
-					this.dataAspectRatio =
-						(this.xMax - this.xMin) / Math.abs(this.yMax - this.yMin);
-
+					this.dataAspectRatio = (this.xMax - this.xMin) / Math.abs(this.yMax - this.yMin);
+					
 					// 计算THREE.js场景中的坐标范围，保持数据比例
 					this.sceneHeight = 1.0; // THREE.js场景中y轴的总高度
 					this.sceneWidth = this.sceneHeight * this.dataAspectRatio; // 按数据比例计算x轴宽度
-
+					
 					// 创建比例尺 - 使用准确的数据范围和比例
-					this.xScale = d3
-						.scaleLinear()
+					this.xScale = d3.scaleLinear()
 						.domain([this.xMin, this.xMax])
 						.range([-this.sceneWidth / 2, this.sceneWidth / 2]);
 
-					this.yScale = d3
-						.scaleLinear()
+					this.yScale = d3.scaleLinear()
 						.domain([this.yMin, this.yMax])
 						.range([this.sceneHeight / 2, -this.sceneHeight / 2]); // Y轴翻转
-
+					
 					// 特定阈值
-					this.specificThresholds = [
-						-100, -50, 0, 50, 100, 150, 200, 250, 300, 350, 400, 450, 500, 550,
-						600, 650, 700, 750, 800, 850, 900, 980,
-					];
-
+					this.specificThresholds = [-100,-50, 0, 50,100,150, 200,250, 300,350, 400,450, 500,550,600,650,700,750,800,850,900, 980];
+					
 					// 材质缓存，避免重复创建
 					this.materialCache = new Map();
-
+					
 					// 创建一维数组来存储数据，以供D3使用
 					this.gridData = new Array(this.gridSizeY * this.gridSizeX);
-
+					
 					// 网格和相关对象
 					this.contourGroup = new THREE.Group(); // 用于存储所有等值线相关的网格
 					this.contourMeshes = []; // 保存等值线网格的引用
 					this.contourLabels = []; // 保存等值线标注的引用
 				}
-
+				
 				// 处理contourData中的数据，转换为D3可用的格式
 				processContourData() {
 					// 将二维数组扁平化为一维
@@ -195,26 +440,25 @@
 
 					return this.gridData;
 				}
-
+				
 				// 预处理数据，确保NaN值被正确处理
 				handleNullInGrid(gridData) {
 					// 创建一个副本，避免修改原始数据
 					const processedData = [...gridData];
-
+					
 					// 确保所有NaN和null值被正确替换为D3能理解的值
 					for (let i = 0; i < processedData.length; i++) {
 						if (processedData[i] === null || isNaN(processedData[i])) {
 							processedData[i] = NaN; // D3 contour generator会跳过NaN值
 						}
 					}
-
+					
 					return processedData;
 				}
-
+				
 				// 获取或创建材质
 				getMaterial(color, isLine = false, renderIndex = 0) {
-					const key =
-						color.toString() + (isLine ? "_line" : "_mesh") + "_" + renderIndex;
+					const key = color.toString() + (isLine ? "_line" : "_mesh") + "_" + renderIndex;
 
 					if (this.materialCache.has(key)) {
 						return this.materialCache.get(key);
@@ -249,7 +493,7 @@
 					this.materialCache.set(key, material);
 					return material;
 				}
-
+				
 				// 根据数据值获取颜色
 				getTerrainColor(value) {
 					const localOriginColor = [
@@ -280,8 +524,7 @@
 
 					const localOriginColorLen = localOriginColor.length;
 					const localOriginColorMin = localOriginColor[0][0];
-					const localOriginColorMax =
-						localOriginColor[localOriginColorLen - 1][0];
+					const localOriginColorMax = localOriginColor[localOriginColorLen - 1][0];
 
 					if (value <= localOriginColorMin) {
 						return localOriginColor[0][1];
@@ -299,18 +542,18 @@
 						return localOriginColor[0][1];
 					}
 				}
-
+				
 				// 解析颜色字符串为THREE.Color
 				parseColor(colorStr) {
 					const rgba = colorStr.match(/\d+/g).map(Number);
 					return new THREE.Color(rgba[0] / 255, rgba[1] / 255, rgba[2] / 255);
 				}
-
+				
 				// 初始化并创建等值线
 				init() {
 					// 处理网格数据
 					const processedGridData = this.processContourData();
-
+					
 					// 设置contour生成器
 					const contourGenerator = ztContours()
 						.size([this.gridSizeX, this.gridSizeY])
@@ -318,19 +561,17 @@
 						.x(this.dataX)
 						.y(this.dataY)
 						.smooth(this.options.smooth);
-
+						
 					// 计算等值线 - 使用预处理的数据
-					const contours = contourGenerator(
-						this.handleNullInGrid(processedGridData)
-					);
-
+					const contours = contourGenerator(this.handleNullInGrid(processedGridData));
+					
 					// 创建等值线
 					this.createContours(contours);
-
+					
 					// 返回包含所有等值线的组
 					return this.contourGroup;
 				}
-
+				
 				// 创建等值线
 				createContours(contours) {
 					// 清除现有的等值线网格
@@ -353,9 +594,7 @@
 					this.materialCache.clear();
 
 					// 确保从低值到高值的顺序处理等值线 - 先进行排序
-					const sortedContours = [...contours].sort(
-						(a, b) => a.value - b.value
-					);
+					const sortedContours = [...contours].sort((a, b) => a.value - b.value);
 
 					// 统一处理等值线 - 同时创建面和线，确保一致性
 					for (let i = 0; i < sortedContours.length; i++) {
@@ -373,27 +612,22 @@
 							// 遍历轮廓线的点，转换到Three.js坐标系
 							for (let j = 0; j < polygon[0].length; j++) {
 								const point = polygon[0][j];
-
+								
 								// 检查点是否存在
 								if (!point || point.length < 2) {
 									continue;
 								}
-
+								
 								const [x, y] = point;
 
 								// 检查坐标值是否有效
-								if (
-									x === undefined ||
-									y === undefined ||
-									isNaN(x) ||
-									isNaN(y)
-								) {
+								if (x === undefined || y === undefined || isNaN(x) || isNaN(y)) {
 									continue; // 跳过无效坐标
 								}
 
 								// 使用比例尺将数据坐标转换到场景坐标
-								const sceneX = x; //this.xScale(x);
-								const sceneY = y; //this.yScale(y);
+								const sceneX = x; // 直接使用原始x坐标
+								const sceneY = y; // 直接使用原始y坐标
 
 								if (j === 0) {
 									shape.moveTo(sceneX, sceneY);
@@ -416,27 +650,22 @@
 
 								for (let k = 0; k < polygon[j].length; k++) {
 									const point = polygon[j][k];
-
+									
 									// 检查点是否存在
 									if (!point || point.length < 2) {
 										continue;
 									}
-
+									
 									const [x, y] = point;
 
 									// 检查坐标值是否有效
-									if (
-										x === undefined ||
-										y === undefined ||
-										isNaN(x) ||
-										isNaN(y)
-									) {
+									if (x === undefined || y === undefined || isNaN(x) || isNaN(y)) {
 										continue; // 跳过无效坐标
 									}
 
 									// 使用比例尺将数据坐标转换到场景坐标
-									const sceneX = this.xScale(x);
-									const sceneY = this.yScale(y);
+									const sceneX = x; // 直接使用原始x坐标
+									const sceneY = y; // 直接使用原始y坐标
 
 									if (k === 0) {
 										hole.moveTo(sceneX, sceneY);
@@ -452,7 +681,7 @@
 							let geometry;
 							try {
 								geometry = new THREE.ShapeGeometry(shape, 32);
-
+								
 								// 检查几何体是否有效
 								if (geometry.attributes.position.count === 0) {
 									geometry.dispose();
@@ -506,69 +735,47 @@
 							}
 						}
 					}
-
+					
 					// 添加边界线
 					this.addBoundaryLine();
 				}
-
+				
 				// 添加外部边界线
 				addBoundaryLine() {
-					// 创建边界点
+					// 创建边界点，直接使用原始数据坐标
 					const borderPoints = [
-						new THREE.Vector3(
-							this.xScale(this.xMin),
-							this.yScale(this.yMin),
-							0.001
-						),
-						new THREE.Vector3(
-							this.xScale(this.xMax),
-							this.yScale(this.yMin),
-							0.001
-						),
-						new THREE.Vector3(
-							this.xScale(this.xMax),
-							this.yScale(this.yMax),
-							0.001
-						),
-						new THREE.Vector3(
-							this.xScale(this.xMin),
-							this.yScale(this.yMax),
-							0.001
-						),
-						new THREE.Vector3(
-							this.xScale(this.xMin),
-							this.yScale(this.yMin),
-							0.001
-						),
+						new THREE.Vector3(this.xMin, this.yMin, 0.001),
+						new THREE.Vector3(this.xMax, this.yMin, 0.001),
+						new THREE.Vector3(this.xMax, this.yMax, 0.001),
+						new THREE.Vector3(this.xMin, this.yMax, 0.001),
+						new THREE.Vector3(this.xMin, this.yMin, 0.001)
 					];
-
+					
 					// 创建边界线几何体
-					const borderGeometry = new THREE.BufferGeometry().setFromPoints(
-						borderPoints
-					);
+					const borderGeometry = new THREE.BufferGeometry().setFromPoints(borderPoints);
 					const borderMaterial = new THREE.LineBasicMaterial({
 						color: 0x333333,
 						linewidth: 1,
 						opacity: 0.3,
 						transparent: true,
-						depthTest: false,
+						depthTest: false
 					});
-
+					
 					const borderLine = new THREE.Line(borderGeometry, borderMaterial);
 					borderLine.renderOrder = 1000; // 确保边界线始终显示在最上层
-
+					
 					this.contourGroup.add(borderLine);
 					this.contourMeshes.push(borderLine);
 				}
-
+				
 				// 更新等值线显示设置
 				updateOptions(options = {}) {
 					// 更新选项
 					this.options = { ...this.options, ...options };
-
+					
 					// 重新生成等值线
 					const processedGridData = this.processContourData();
-
+					
 					// 设置contour生成器
 					const contourGenerator = ztContours()
 						.size([this.gridSizeX, this.gridSizeY])
@@ -576,231 +783,80 @@
 						.x(this.dataX)
 						.y(this.dataY)
 						.smooth(this.options.smooth);
-
+						
 					// 计算等值线 - 使用预处理的数据
-					const contours = contourGenerator(
-						this.handleNullInGrid(processedGridData)
-					);
-
+					const contours = contourGenerator(this.handleNullInGrid(processedGridData));
+					
 					// 创建等值线
 					this.createContours(contours);
-
+					
 					return this.contourGroup;
 				}
-
+				
 				// 显示或隐藏等值线轮廓
 				toggleContourLines(show) {
 					this.options.showContourLines = show;
 					this.updateOptions();
 				}
-
+				
 				// 设置新的阈值
 				setThresholds(thresholds) {
 					this.specificThresholds = thresholds;
 					this.updateOptions();
 				}
-
+				
 				// 获取相机合适的距离
 				getCameraDistance() {
 					return Math.max(this.dataAspectRatio, 2) * 1.2;
 				}
-
+				
 				// 获取场景尺寸
 				getSceneDimensions() {
 					return {
 						width: this.sceneWidth,
 						height: this.sceneHeight,
-						aspectRatio: this.dataAspectRatio,
+						aspectRatio: this.dataAspectRatio
 					};
 				}
 			}
 
 			// 创建Contour实例并初始化
 			const contourRenderer = new Contour({
-				showContourLines: false,
+				showContourLines: true,
 				showContourLabels: false,
-				smooth: true,
+				smooth: true
 			});
-
+			
 			// 获取等值线组并添加到场景
 			const contourGroup = contourRenderer.init();
+			scene.add(contourGroup);
 
-			// 创建Contour实例并初始化
-			const contourRenderer1 = new Contour({
-				showContourLines: false,
-				showContourLabels: false,
-				smooth: true,
+			// UI事件监听
+			document
+				.getElementById("showContourLines")
+				.addEventListener("change", (event) => {
+					// 更新contour选项并重新生成
+					contourRenderer.toggleContourLines(event.target.checked);
+				});
+			
+			// 修改动画循环，增加标签渲染
+			function animate() {
+				requestAnimationFrame(animate);
+				controls.update();
+				renderer.render(scene, camera);
+				labelRenderer.render(scene, camera);
+				stats.update();
+			}
+			
+			// 窗口大小调整处理
+			window.addEventListener("resize", () => {
+				camera.aspect = window.innerWidth / window.innerHeight;
+				camera.updateProjectionMatrix();
+				renderer.setSize(window.innerWidth, window.innerHeight);
+				labelRenderer.setSize(window.innerWidth, window.innerHeight);
 			});
-
-			// 获取等值线组并添加到场景
-			const contourGroup1 = contourRenderer1.init();
-
-			// 创建地图
-			function createMap() {
-				// 影像数据源
-				const imgSource = [source.arcGisSource, source.arcGisCiaSource];
-				// 地形数据源
-				const demSource = source.arcGisDemSource;
-
-				// 创建地图对象
-				const map = new tt.TileMap({
-					// 影像数据源
-					imgSource: imgSource,
-					// 高程数据源
-					demSource: demSource,
-					// 地图投影中央经线经度
-					lon0: 90,
-					// 最小缩放级别
-					minLevel: 2,
-					// 最大缩放级别
-					maxLevel: 20,
-				});
-
-				// map.scale.setScalar(1000);
-
-				// 地图旋转到xz平面
-				map.rotateX(-Math.PI / 2);
-				// 开启阴影
-				// map.receiveShadow = true;
-
-				// 地图准备就绪
-				map.addEventListener("ready", () => console.log("Map ready!!!!!!"));
-
-				return map;
-			}
-
-			// 初始化三维场景
-			function initViewer(id, map) {
-				// 初始化场景
-				const viewer = new plugin.GLViewer(id);
-				// 地图添加到场景
-				viewer.scene.add(map);
-
-				// 填加伪球体
-				// const frakeEarth = plugin.createFrakEarth(map);
-				// map.add(frakeEarth);
-				// map.addEventListener("update", () => {
-				// 	frakeEarth.visible = viewer.controls.getDistance() > 5e5;
-				// });
-
-				// 添加罗盘
-				// const compass = plugin.createCompass(viewer.controls);
-				// document.querySelector("#compass-container")?.appendChild(compass.dom);
-
-				// 防止摄像机进入地下
-				viewer.addEventListener("update", () => {
-					plugin.limitCameraHeight(map, viewer.camera);
-				});
-
-				// 测试
-				// const imageBounds = map.projection.getProjBounds([105, 33, 109, 37]);
-				// const imageMesh = createBoundsMesh(imageBounds, 0xffff00);
-				// map.add(imageMesh);
-
-				// const tileBounds = map.projection.getTileBounds(7, 2, 3);
-				// const tileMesh = createBoundsMesh(tileBounds, 0xff0000);
-				// map.add(tileMesh);
-
-				// const mapBounds = map.imgSource[0]._projectionBounds;
-				// const mapMesh = createBoundsMesh(mapBounds, 0x00ff00);
-				// map.add(mapMesh);
-
-				return viewer;
-			}
-
-			// 动画漫游指定位置
-			function fly(viewer, map) {
-				// 地图中心坐标(经度，纬度，高度)
-				const centerGeo = new THREE.Vector3(108, 34, 0);
-				// 摄像坐标(经度，纬度，高度)
-				const camersGeo = new THREE.Vector3(108, 0, 1000);
-				// 地图中心经纬度高度转为世界坐标
-				const centerPosition = map.geo2world(centerGeo);
-				// 摄像经纬度高度转为世界坐标
-				const cmaeraPosition = map.geo2world(camersGeo);
-				viewer.controls.enabled = false;
-				// 飞到指定位置
-				viewer.flyTo(centerPosition, cmaeraPosition, true, () => {
-					viewer.controls.enabled = true;
-				});
-			}
-
-			// 创建地图
-			const map = createMap();
-			// 创建视图
-			const viewer = initViewer("#map", map);
-
-			const geoGroup = new THREE.Group();
-			geoGroup.renderOrder = 10;
-
-			// 地图中心经纬度高度
-			const centerGeo = new THREE.Vector3(108, 34, 0);
-			// 摄像机经纬度高度
-			const cameraGeo = new THREE.Vector3(108, 0, 10000);
-
-			const center = map.geo2pos(centerGeo);
-			const geo = new THREE.BoxGeometry(80000, 80000, 10000);
-			const box = new THREE.Mesh(geo);
-			box.position.set(center.x, center.y, 510);
-			geoGroup.add(new THREE.BoxHelper(box));
-			map.add(geoGroup);
-
-			// 添加等值线1
-
-			const contourPosition =  new THREE.Vector3(108, 34, 0); 
-			const contourPositionEN = map.geo2pos(contourPosition);
-
-			const contourPosition1 =  new THREE.Vector3(108.32, 34.45, 0); 
-			const contourPositionEN1 = map.geo2pos(contourPosition1);
-
-
-			const contourPosition2 =  new THREE.Vector3(108.46, 35.15, 0); 
-			const contourPositionEN2 = map.geo2pos(contourPosition2);
-
-
-			console.log('contourPositionEN--',contourPositionEN,'contourPositionEN1--',contourPositionEN1,'contourPositionEN2--',contourPositionEN2);
-
-			// 计算contourPositionEN与contourPositionEN1的向量方向
-			const direction1 = new THREE.Vector3().subVectors(contourPositionEN1, contourPositionEN);
-			direction1.normalize();
 			
-			// 计算contourPositionEN与contourPositionEN2的向量方向
-			const direction2 = new THREE.Vector3().subVectors(contourPositionEN2, contourPositionEN);
-			direction2.normalize();
-			
-			// 根据向量方向计算旋转角度
-			// 默认方向假设为(0,1,0)，计算需要旋转的角度
-			const defaultDirection = new THREE.Vector3(0, 1, 0);
-			
-			// 计算contourGroup的旋转角度(围绕z轴旋转)
-			const angle1 = Math.atan2(direction1.x, direction1.y);
-			
-			// 计算contourGroup1的旋转角度
-			const angle2 = Math.atan2(direction2.x, direction2.y);
-			
-			console.log("Direction 1:", direction1, "Angle:", angle1 * (180/Math.PI));
-			console.log("Direction 2:", direction2, "Angle:", angle2 * (180/Math.PI));
-
-			contourGroup.renderIndex = 1000;
-			contourGroup.position.set(contourPositionEN.x, contourPositionEN.y, 2000);
-			contourGroup.scale.set(10, 10, 10);
-			// 应用第一个向量方向到contourGroup
-			contourGroup.rotation.x = Math.PI / 2;
-			contourGroup.rotation.y = angle1;
-			map.add(contourGroup);
-
-			contourGroup1.renderIndex = 1000;
-			contourGroup1.position.set(contourPositionEN.x, contourPositionEN.y, 2000);
-			contourGroup1.scale.set(10, 10, 10);
-			// 应用第二个向量方向到contourGroup1
-			contourGroup1.rotation.x = Math.PI / 2;
-			contourGroup1.rotation.y = angle2;
-			map.add(contourGroup1);
-
-			// 添加等值线2
-
-			// 摄像机动画移动到3000高度
-			fly(viewer, map);
+			animate();
 		</script>
 	</body>
 </html>
