@@ -179,6 +179,26 @@
 			controls.enableDamping = true;
 			controls.dampingFactor = 0.25;
 
+			// 裁切相关变量
+			let clippingEnabled = false;  // 裁切功能是否激活
+			let clippingPlane = null;     // 裁切平面
+			let clippingHelper = null;    // 裁切平面可视化辅助
+			
+			// 射线投射器，用于检测鼠标点击
+			const raycaster = new THREE.Raycaster();
+			const mouse = new THREE.Vector2();
+			
+			// 消息显示函数
+			function showMessage(text, duration = 3000) {
+				const messageEl = document.getElementById('message');
+				messageEl.textContent = text;
+				messageEl.classList.add('visible');
+				
+				setTimeout(() => {
+					messageEl.classList.remove('visible');
+				}, duration);
+			}
+
 			// 添加性能监视器
 			const stats = new Stats();
 			stats.domElement.style.position = "absolute";
@@ -223,7 +243,7 @@
 			});
 			const plane = new THREE.Mesh(planeGeometry, planeMaterial);
 			plane.position.set(79, 0, 0);
-			scene.add(plane);
+			// scene.add(plane);
 			
 			// 创建坐标轴刻度和标签
 			function createAxisTicks() {
@@ -478,6 +498,7 @@
 							depthWrite: false,
 							transparent: true,
 							opacity: isSpecificContour ? 1.0 : 0.8,
+							clippingPlanes: [], // 支持裁切平面
 						});
 					} else {
 						material = new THREE.MeshBasicMaterial({
@@ -487,6 +508,7 @@
 							side: THREE.DoubleSide,
 							depthWrite: false,
 							depthTest: true,
+							clippingPlanes: [], // 支持裁切平面
 						});
 					}
 
@@ -855,6 +877,165 @@
 				renderer.setSize(window.innerWidth, window.innerHeight);
 				labelRenderer.setSize(window.innerWidth, window.innerHeight);
 			});
+			
+			// 裁切功能实现
+			function activateClipping() {
+				clippingEnabled = true;
+				
+				// 显示提示消息
+				showMessage("裁切功能已激活，请点击等值线上的任意点");
+				
+				// 改变鼠标样式，表示特殊模式
+				document.body.style.cursor = "crosshair";
+			}
+			
+			// 取消裁切
+			function deactivateClipping() {
+				clippingEnabled = false;
+				document.body.style.cursor = "default";
+				
+				// 如果有裁切平面，移除它
+				if (clippingPlane) {
+					// 从所有材质中移除裁切平面
+					contourRenderer.contourMeshes.forEach(mesh => {
+						if (mesh.material && mesh.material.clippingPlanes) {
+							mesh.material.clippingPlanes = [];
+						}
+					});
+					
+					// 移除裁切平面辅助对象
+					if (clippingHelper) {
+						scene.remove(clippingHelper);
+						clippingHelper = null;
+					}
+					
+					clippingPlane = null;
+				}
+			}
+			
+			// 点击处理函数
+			function onMouseClick(event) {
+				// 只在裁切功能激活时处理点击
+				if (!clippingEnabled) return;
+				
+				// 计算鼠标在归一化设备坐标中的位置
+				mouse.x = (event.clientX / window.innerWidth) * 2 - 1;
+				mouse.y = -(event.clientY / window.innerHeight) * 2 + 1;
+				
+				// 设置射线
+				raycaster.setFromCamera(mouse, camera);
+				
+				// 获取所有相交的对象
+				const intersects = raycaster.intersectObjects(contourRenderer.contourMeshes, true);
+				
+				if (intersects.length > 0) {
+					// 获取第一个相交点
+					const intersection = intersects[0];
+					const point = intersection.point;
+					const face = intersection.face;
+					
+					// 只处理等值面网格(Mesh)，不处理线段(LineSegments)
+					if (intersection.object instanceof THREE.Mesh) {
+						// 获取相交面的法线
+						const normal = face.normal.clone();
+						// 转换到世界坐标系
+						normal.transformDirection(intersection.object.matrixWorld);
+						
+						// 创建垂直于等值面的法线（垂直于原来的法线）
+						// 由于等值线大多在XY平面上，原始法线大致指向Z方向
+						// 选择一个垂直于原始法线的向量，例如在XY平面上的向量
+						
+						// 方法1：使用叉积创建一个垂直向量
+						// 首先创建一个任意方向的辅助向量，不能与法线平行
+						const auxVector = Math.abs(normal.y) < 0.99 
+						  ? new THREE.Vector3(0, 1, 0)  // 如果法线不是垂直于Y轴，使用Y轴
+						  : new THREE.Vector3(1, 0, 0); // 如果法线几乎垂直于Y轴，使用X轴
+						
+						// 计算垂直于法线和辅助向量的向量
+						const clipNormal = new THREE.Vector3();
+						clipNormal.crossVectors(normal, auxVector).normalize();
+						
+						// 显示法线信息
+						console.log("原始法线:", normal);
+						console.log("裁切面法线:", clipNormal);
+						showMessage(`原始法线: (${normal.x.toFixed(2)}, ${normal.y.toFixed(2)}, ${normal.z.toFixed(2)})
+裁切面法线: (${clipNormal.x.toFixed(2)}, ${clipNormal.y.toFixed(2)}, ${clipNormal.z.toFixed(2)})`, 5000);
+						
+						// 创建垂直于等值面的裁切平面
+						clippingPlane = new THREE.Plane(clipNormal, -point.dot(clipNormal));
+						
+						// 应用裁切平面到所有等值线和等值面材质
+						contourRenderer.contourMeshes.forEach(mesh => {
+							if (mesh.material && mesh.material.clippingPlanes) {
+								mesh.material.clippingPlanes = [clippingPlane];
+							}
+						});
+						
+						// 创建裁切平面辅助对象
+						if (clippingHelper) {
+							scene.remove(clippingHelper);
+						}
+						
+						// 创建一个平面辅助对象来可视化裁切平面
+						const planeSize = 100; // Math.max(sceneWidth, sceneHeight) * 2;
+						const planeGeometry = new THREE.PlaneGeometry(planeSize, planeSize);
+						const planeMaterial = new THREE.MeshBasicMaterial({
+							color: 0xff0000,
+							transparent: true,
+							opacity: 0.2,
+							side: THREE.DoubleSide
+						});
+						
+						clippingHelper = new THREE.Mesh(planeGeometry, planeMaterial);
+						clippingHelper.position.copy(point);
+						// 恢复朝向设置
+						clippingHelper.lookAt(point.clone().add(clipNormal));
+						
+						// 添加一个小的偏移，确保平面不会完全与裁切平面重合
+						// clippingHelper.position.add(clipNormal.clone().multiplyScalar(0.001));
+						
+						// 设置高渲染顺序确保在前面
+						// clippingHelper.renderOrder = 100;
+						
+						// 添加线框以便更容易看到
+						const wireframe = new THREE.WireframeGeometry(planeGeometry);
+						const line = new THREE.LineSegments(wireframe);
+						line.material.color.set(0x000000);
+						clippingHelper.add(line);
+
+						scene.add(clippingHelper);
+						
+						showMessage("裁切平面已创建");
+						// deactivateClipping();
+					} else {
+						// 如果点击的是线段，提示用户点击等值面
+						showMessage("请点击等值面区域，而不是轮廓线");
+					}
+				} else {
+					// 没有相交对象
+					showMessage("未检测到等值面，请重试");
+				}
+			}
+			
+			// 清除裁切按钮
+			function addClearClippingButton() {
+				const clearButton = document.createElement('button');
+				clearButton.textContent = '移除裁切';
+				clearButton.id = 'clearClipping';
+				clearButton.style.marginLeft = '10px';
+				clearButton.addEventListener('click', deactivateClipping);
+				
+				// 获取激活裁切按钮的父元素，将清除按钮添加到相同位置
+				const activateButton = document.getElementById('activateClipping');
+				activateButton.parentNode.appendChild(clearButton);
+			}
+			
+			// 添加事件监听
+			document.getElementById('activateClipping').addEventListener('click', activateClipping);
+			document.addEventListener('click', onMouseClick);
+			
+			// 添加清除裁切按钮
+			addClearClippingButton();
 			
 			animate();
 		</script>
