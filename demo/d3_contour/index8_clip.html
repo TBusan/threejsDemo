@@ -61,6 +61,24 @@
 			#message.visible {
 				opacity: 1;
 			}
+			.transform-btn {
+				margin-right: 5px;
+				padding: 5px 10px;
+				border: none;
+				border-radius: 3px;
+				background-color: #444;
+				color: white;
+				cursor: pointer;
+			}
+			.transform-btn:hover {
+				background-color: #666;
+			}
+			.transform-btn.active {
+				background-color: #007bff;
+			}
+			#transformControls {
+				margin-top: 10px;
+			}
 		</style>
 	</head>
 	<body>
@@ -77,6 +95,11 @@
 			</div>
 			<div>
 				<button id="activateClipping">激活裁切功能</button>
+			</div>
+			<div id="transformControls" style="display: none;">
+				<button id="translateMode" class="transform-btn active">平移模式</button>
+				<button id="rotateMode" class="transform-btn">旋转模式</button>
+				<button id="scaleMode" class="transform-btn">缩放模式</button>
 			</div>
 		</div>
 		<div id="container"></div>
@@ -97,6 +120,7 @@
 			import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 			import { CSS2DRenderer, CSS2DObject } from "three/addons/renderers/CSS2DRenderer.js";
 			import Stats from "three/addons/libs/stats.module.js";
+			import { TransformControls } from "three/addons/controls/TransformControls.js";
 			import { contourData } from "./contourData2.js";
 			import { contours as ztContours, contourDensity } from "./d3_zoutao.js";
 			// ===== D3.js 部分：生成等值线数据 =====
@@ -183,6 +207,8 @@
 			let clippingEnabled = false;  // 裁切功能是否激活
 			let clippingPlane = null;     // 裁切平面
 			let clippingHelper = null;    // 裁切平面可视化辅助
+			let transformControls = null; // 变换控制器
+			let transformControlsActive = false; // 变换控制器是否激活
 			
 			// 射线投射器，用于检测鼠标点击
 			const raycaster = new THREE.Raycaster();
@@ -881,12 +907,68 @@
 			// 裁切功能实现
 			function activateClipping() {
 				clippingEnabled = true;
+				transformControlsActive = false; // 确保重置变换控制器状态
 				
 				// 显示提示消息
 				showMessage("裁切功能已激活，请点击等值线上的任意点");
 				
 				// 改变鼠标样式，表示特殊模式
 				document.body.style.cursor = "crosshair";
+			}
+			
+			// 初始化变换控制器
+			function initTransformControls(target) {
+				// 如果已存在，先移除
+				if (transformControls) {
+					scene.remove(transformControls);
+					transformControls.dispose();
+				}
+				
+				// 创建变换控制器并附加到目标对象
+				transformControls = new TransformControls(camera, renderer.domElement);
+				transformControls.attach(target);
+				transformControls.setMode('translate'); // 默认为平移模式
+				transformControls.setSize(0.8);         // 设置控制器大小
+				scene.add(transformControls.getHelper());
+				
+				// 设置变换控制器状态为激活
+				transformControlsActive = true;
+				
+				// 当变换控制器处于激活状态时，暂停轨道控制器以避免冲突
+				transformControls.addEventListener('dragging-changed', function(event) {
+					controls.enabled = !event.value;
+				});
+				
+				// 当物体被变换时，更新裁切平面
+				transformControls.addEventListener('objectChange', updateClippingPlane);
+				
+				// 显示变换控制器UI
+				document.getElementById('transformControls').style.display = 'block';
+			}
+			
+			// 更新裁切平面的位置和方向
+			function updateClippingPlane() {
+				if (!clippingPlane || !clippingHelper) return;
+				
+				// 获取裁切平面辅助对象的世界位置和方向
+				const position = new THREE.Vector3();
+				clippingHelper.getWorldPosition(position);
+				
+				// 获取裁切面的法线方向
+				const normal = new THREE.Vector3(0, 0, 1); // 假设平面的正面朝向Z轴正方向
+				normal.applyQuaternion(clippingHelper.quaternion);
+				normal.normalize();
+				
+				// 更新裁切平面
+				clippingPlane.normal.copy(normal);
+				clippingPlane.constant = -position.dot(normal);
+				
+				// 输出调试信息
+				console.log("裁切平面已更新:", {
+					position: position.clone(),
+					normal: normal.clone(),
+					constant: clippingPlane.constant
+				});
 			}
 			
 			// 取消裁切
@@ -911,12 +993,25 @@
 					
 					clippingPlane = null;
 				}
+				
+				// 移除变换控制器
+				if (transformControls) {
+					scene.remove(transformControls);
+					transformControls.dispose();
+					transformControls = null;
+					
+					// 重置变换控制器状态
+					transformControlsActive = false;
+				}
+				
+				// 隐藏变换控制器UI
+				document.getElementById('transformControls').style.display = 'none';
 			}
 			
 			// 点击处理函数
 			function onMouseClick(event) {
-				// 只在裁切功能激活时处理点击
-				if (!clippingEnabled) return;
+				// 只在裁切功能激活且变换控制器未激活时处理点击
+				if (!clippingEnabled || transformControlsActive) return;
 				
 				// 计算鼠标在归一化设备坐标中的位置
 				mouse.x = (event.clientX / window.innerWidth) * 2 - 1;
@@ -1005,6 +1100,9 @@
 
 						scene.add(clippingHelper);
 						
+						// 初始化变换控制器
+						initTransformControls(clippingHelper);
+						
 						showMessage("裁切平面已创建");
 						// deactivateClipping();
 					} else {
@@ -1033,6 +1131,37 @@
 			// 添加事件监听
 			document.getElementById('activateClipping').addEventListener('click', activateClipping);
 			document.addEventListener('click', onMouseClick);
+			
+			// 添加变换模式切换事件监听
+			document.getElementById('translateMode').addEventListener('click', () => {
+				if (transformControls) {
+					transformControls.setMode('translate');
+					highlightActiveButton('translateMode');
+				}
+			});
+			
+			document.getElementById('rotateMode').addEventListener('click', () => {
+				if (transformControls) {
+					transformControls.setMode('rotate');
+					highlightActiveButton('rotateMode');
+				}
+			});
+			
+			document.getElementById('scaleMode').addEventListener('click', () => {
+				if (transformControls) {
+					transformControls.setMode('scale');
+					highlightActiveButton('scaleMode');
+				}
+			});
+			
+			// 高亮当前活动的按钮
+			function highlightActiveButton(activeId) {
+				const buttons = ['translateMode', 'rotateMode', 'scaleMode'];
+				buttons.forEach(id => {
+					document.getElementById(id).classList.remove('active');
+				});
+				document.getElementById(activeId).classList.add('active');
+			}
 			
 			// 添加清除裁切按钮
 			addClearClippingButton();

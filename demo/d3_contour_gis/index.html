@@ -102,13 +102,49 @@
 			import * as THREE from "three";
 			import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 			import Stats from "three/addons/libs/stats.module.js";
-			import { contourData } from "./contourData2.js";
+			import { contourData } from "./contourData_gis2.js";
 			import { contours as ztContours, contourDensity } from "./d3_zoutao.js";
 			import * as source from "../../threetiles/mapSource.js";
 			import * as tt from "three-tile";
 			import * as plugin from "three-tile-plugin";
 			// import { createMap, initViewer, fly } from "./map.js";
 			// ===== D3.js 部分：生成等值线数据 =====
+
+			// const lonMax = Math.max(...contourData.data.lon);
+			// const lonMin = Math.min(...contourData.data.lon);
+			// const latMax = Math.max(...contourData.data.lat);
+			// const latMin = Math.min(...contourData.data.lat);
+
+			let numbers = contourData.data.lon;
+			let maxNumber = numbers[0];
+			let maxIndex = 0;
+			let minNumber = numbers[0];
+			let minIndex = 0;
+
+			for (let i = 1; i < numbers.length; i++) {
+				if (numbers[i] > maxNumber) {
+					maxNumber = numbers[i];
+					maxIndex = i;
+				}
+			}
+
+			for (let i = 1; i < numbers.length; i++) {
+
+				if(numbers[i] < minNumber) {
+					minNumber = numbers[i];
+					minIndex = i;
+				}
+			}
+
+			debugger
+
+			console.log("经度的最大值:", maxNumber); // 输出: 最大值: 9
+			console.log("最大值的索引:", maxIndex); // 输出: 最大值的索引: 4
+
+			console.log("经度的最小值:", minNumber);
+			console.log("最小值的索引:", minIndex);
+
+			// console.log("经纬度的最大最小值", lonMax, lonMin, latMax, latMin);
 
 			// 初始化地图////////////////////////////////////////////////////////////
 			//===== 等值线类定义 =====
@@ -711,9 +747,17 @@
 			// 动画漫游指定位置
 			function fly(viewer, map) {
 				// 地图中心坐标(经度，纬度，高度)
-				const centerGeo = new THREE.Vector3(108, 34, 0);
+				const centerGeo = new THREE.Vector3(
+					121.64964424641417,
+					28.726276405640643,
+					0
+				);
 				// 摄像坐标(经度，纬度，高度)
-				const camersGeo = new THREE.Vector3(108, 0, 1000);
+				const camersGeo = new THREE.Vector3(
+					121.64964424641417,
+					28.726276405640643,
+					1000
+				);
 				// 地图中心经纬度高度转为世界坐标
 				const centerPosition = map.geo2world(centerGeo);
 				// 摄像经纬度高度转为世界坐标
@@ -734,67 +778,126 @@
 			geoGroup.renderOrder = 10;
 
 			// 地图中心经纬度高度
-			const centerGeo = new THREE.Vector3(108, 34, 0);
+			const centerGeo = new THREE.Vector3(
+				121.64964424641417,
+				28.726276405640643,
+				0
+			);
 			// 摄像机经纬度高度
-			const cameraGeo = new THREE.Vector3(108, 0, 10000);
+			const cameraGeo = new THREE.Vector3(
+				121.64964424641417,
+				28.726276405640643,
+				10000
+			);
 
+			// 添加一个box
 			const center = map.geo2pos(centerGeo);
-			const geo = new THREE.BoxGeometry(80000, 80000, 10000);
+			const geo = new THREE.BoxGeometry(8000, 8000, 8000);
 			const box = new THREE.Mesh(geo);
 			box.position.set(center.x, center.y, 510);
 			geoGroup.add(new THREE.BoxHelper(box));
+
+			// 添加三个圆点
+
+			// 创建一个球体几何体，半径为0.1（即我们的小圆点），宽度和高度分段数为32
+			const startPoint = new THREE.Vector3(
+				121.64958761890348,
+				28.72765012316294,
+				10000
+			);
+
+
+			const midPoint = new THREE.Vector3(
+				121.64958897963068,
+				28.72767645661258,
+				10000
+			);
+
+
+			const endPoint = new THREE.Vector3(
+				121.64965037654844,
+				28.72630235065309,
+				10000
+			);
+
+			const pointHeight = 5;
+			const startPosition = map.geo2pos(startPoint);
+			const sphereGeometry = new THREE.SphereGeometry(5, 32, 32);
+			// 创建材质，这里我们用基础网格材质，并设置颜色
+			const sphereMaterial = new THREE.MeshBasicMaterial({ color: 0xff0000 });
+			// 将几何体和材质组合成网格
+			const sphere1 = new THREE.Mesh(sphereGeometry, sphereMaterial);
+			sphere1.position.set(startPosition.x, startPosition.y, pointHeight);
+			geoGroup.add(sphere1);
+
+	
+			const midPosition = map.geo2pos(midPoint);
+			const sphere2 = new THREE.Mesh(sphereGeometry, sphereMaterial);
+			sphere2.position.set(midPosition.x, midPosition.y, pointHeight);
+			geoGroup.add(sphere2);
+
+	
+			const sphere3Material = new THREE.MeshBasicMaterial({ color: "#18BA4E" });
+			const endPosition = map.geo2pos(endPoint);
+			const sphere3 = new THREE.Mesh(sphereGeometry, sphere3Material);
+			sphere3.position.set(endPosition.x, endPosition.y, pointHeight);
+			geoGroup.add(sphere3);
+
 			map.add(geoGroup);
 
-			// 添加等值线1
-
-			const contourPosition =  new THREE.Vector3(108, 34, 0); 
-			const contourPositionEN = map.geo2pos(contourPosition);
-
-			const contourPosition1 =  new THREE.Vector3(108.32, 34.45, 0); 
-			const contourPositionEN1 = map.geo2pos(contourPosition1);
-
-
-			const contourPosition2 =  new THREE.Vector3(108.46, 35.15, 0); 
-			const contourPositionEN2 = map.geo2pos(contourPosition2);
-
-
-			console.log('contourPositionEN--',contourPositionEN,'contourPositionEN1--',contourPositionEN1,'contourPositionEN2--',contourPositionEN2);
-
 			// 计算contourPositionEN与contourPositionEN1的向量方向
-			const direction1 = new THREE.Vector3().subVectors(contourPositionEN1, contourPositionEN);
+			const direction1 = new THREE.Vector3().subVectors(
+				midPosition,
+				startPosition
+			);
 			direction1.normalize();
-			
+
 			// 计算contourPositionEN与contourPositionEN2的向量方向
-			const direction2 = new THREE.Vector3().subVectors(contourPositionEN2, contourPositionEN);
+			const direction2 = new THREE.Vector3().subVectors(
+				endPoint,
+				startPosition
+			);
 			direction2.normalize();
-			
+
 			// 根据向量方向计算旋转角度
 			// 默认方向假设为(0,1,0)，计算需要旋转的角度
 			const defaultDirection = new THREE.Vector3(0, 1, 0);
-			
 			// 计算contourGroup的旋转角度(围绕z轴旋转)
 			const angle1 = Math.atan2(direction1.x, direction1.y);
-			
 			// 计算contourGroup1的旋转角度
 			const angle2 = Math.atan2(direction2.x, direction2.y);
-			
-			console.log("Direction 1:", direction1, "Angle:", angle1 * (180/Math.PI));
-			console.log("Direction 2:", direction2, "Angle:", angle2 * (180/Math.PI));
 
-			contourGroup.renderIndex = 1000;
-			contourGroup.position.set(contourPositionEN.x, contourPositionEN.y, 2000);
-			contourGroup.scale.set(10, 10, 10);
-			// 应用第一个向量方向到contourGroup
+			console.log(
+				"Direction 1:",
+				direction1,
+				"Angle:",
+				angle1 * (180 / Math.PI)
+			);
+			console.log(
+				"Direction 2:",
+				direction2,
+				"Angle:",
+				angle2 * (180 / Math.PI)
+			);
+
+			const contourHeight = 50;
+			const contourRenderIndex = 1000;
+			contourGroup.renderIndex = contourRenderIndex;
+			contourGroup.position.set(startPosition.x, startPosition.y, contourHeight);
+			// contourGroup.scale.set(10, 10, 10);
 			contourGroup.rotation.x = Math.PI / 2;
-			contourGroup.rotation.y = angle1;
+			// contourGroup.rotation.y = angle1;
 			map.add(contourGroup);
 
-			contourGroup1.renderIndex = 1000;
-			contourGroup1.position.set(contourPositionEN.x, contourPositionEN.y, 2000);
-			contourGroup1.scale.set(10, 10, 10);
-			// 应用第二个向量方向到contourGroup1
+			contourGroup1.renderIndex = contourRenderIndex;
+			contourGroup1.position.set(
+				startPosition.x,
+				startPosition.y,
+				contourHeight
+			);
+			// contourGroup1.scale.set(10, 10, 10);
 			contourGroup1.rotation.x = Math.PI / 2;
-			contourGroup1.rotation.y = angle2;
+			// contourGroup1.rotation.y = angle2;
 			map.add(contourGroup1);
 
 			// 添加等值线2
