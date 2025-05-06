@@ -72,7 +72,6 @@
 				pointer-events: none;
 				line-height: 18px;
 			}
-
 			#compass-container {
 				position: absolute;
 				left: 30px;
@@ -95,7 +94,6 @@
 				background-color: #0008;
 				box-shadow: 0 2px 5px black;
 			}
-
 			.statusbar > #location {
 				width: 380px;
 				text-align: right;
@@ -151,6 +149,7 @@
 			import Stats from "three/addons/libs/stats.module.js";
 			import { contourData } from "./contourData_gis2.js";
 			import { contours as ztContours, contourDensity } from "./d3_zoutao.js";
+			import { TransformControls } from 'three/addons/controls/TransformControls.js'
 			import * as source from "../../threetiles/mapSource.js";
 			import * as tt from "three-tile";
 			import * as plugin from "three-tile-plugin";
