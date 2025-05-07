@@ -819,7 +819,6 @@
 
 			const geoGroup = new THREE.Group();
 			geoGroup.renderOrder = 10000;
-
 			geoGroup.renderIndex = 1000000;
 
 			// 地图中心经纬度高度
@@ -949,6 +948,30 @@
 			contourGroup1.rotateY(angle2 + Math.PI / 2); //对的
 
 			map.add(contourGroup1);
+
+			// === TransformControls 编辑功能 ===
+			const transformControls = new TransformControls(viewer.camera, viewer.renderer.domElement);
+			transformControls.attach(contourGroup1);
+			// debugger
+			viewer.scene.add(transformControls.getHelper());
+			// 防止与OrbitControls冲突
+			transformControls.addEventListener('dragging-changed', function (event) {
+				viewer.controls.enabled = !event.value;
+			});
+			// 添加模式切换按钮
+			const controlsDiv = document.getElementById('controls');
+			const modes = [
+				{ mode: 'translate', label: '平移(Translate)' },
+				{ mode: 'rotate', label: '旋转(Rotate)' },
+				{ mode: 'scale', label: '缩放(Scale)' }
+			];
+			modes.forEach(({ mode, label }) => {
+				const btn = document.createElement('button');
+				btn.innerText = label;
+				btn.style.margin = '0 4px';
+				btn.onclick = () => transformControls.setMode(mode);
+				controlsDiv.appendChild(btn);
+			});
 
 			// 摄像机动画移动到3000高度
 			fly(viewer, map);
