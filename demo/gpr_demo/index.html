@@ -1,0 +1,489 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Three.js GPR数据可视化</title>
+    <style>
+        body { 
+            margin: 0;
+            padding: 0;
+            background: #000;
+            overflow: hidden;
+            font-family: Arial, sans-serif;
+        }
+        #container {
+            position: relative;
+            width: 100vw;
+            height: 100vh;
+        }
+        #controls {
+            position: absolute;
+            top: 10px;
+            left: 10px;
+            background: rgba(255,255,255,0.9);
+            padding: 15px;
+            border-radius: 8px;
+            z-index: 100;
+        }
+        .control-group {
+            margin: 10px 0;
+        }
+        label {
+            display: block;
+            margin: 5px 0;
+            font-size: 12px;
+        }
+        input[type="range"] {
+            width: 200px;
+        }
+        button {
+            padding: 5px 10px;
+            margin: 2px;
+            border: none;
+            border-radius: 3px;
+            background: #007cba;
+            color: white;
+            cursor: pointer;
+        }
+        button:hover {
+            background: #005c8a;
+        }
+        #info {
+            position: absolute;
+            bottom: 10px;
+            left: 10px;
+            color: white;
+            font-size: 12px;
+            background: rgba(0,0,0,0.7);
+            padding: 10px;
+            border-radius: 5px;
+        }
+    </style>
+</head>
+<body>
+    <div id="container">
+        <div id="controls">
+            <div class="control-group">
+                <label>渲染模式:</label>
+                <button onclick="setRenderMode('texture')">纹理模式</button>
+                <button onclick="setRenderMode('heightmap')">高程图</button>
+                <button onclick="setRenderMode('volume')">体渲染</button>
+            </div>
+            <div class="control-group">
+                <label>色彩映射:</label>
+                <button onclick="setColorMap('grayscale')">灰度</button>
+                <button onclick="setColorMap('viridis')">Viridis</button>
+                <button onclick="setColorMap('seismic')">地震</button>
+            </div>
+            <div class="control-group">
+                <label>增益: <span id="gainValue">1.0</span></label>
+                <input type="range" id="gainSlider" min="0.1" max="5" step="0.1" value="1" onchange="updateGain(this.value)">
+            </div>
+            <div class="control-group">
+                <label>透明度: <span id="opacityValue">1.0</span></label>
+                <input type="range" id="opacitySlider" min="0.1" max="1" step="0.1" value="1" onchange="updateOpacity(this.value)">
+            </div>
+            <div class="control-group">
+                <label>高程缩放: <span id="heightValue">1.0</span></label>
+                <input type="range" id="heightSlider" min="0.1" max="5" step="0.1" value="1" onchange="updateHeightScale(this.value)">
+            </div>
+        </div>
+        <div id="info">
+            <div>鼠标左键: 旋转 | 鼠标右键: 平移 | 滚轮: 缩放</div>
+            <div id="dataInfo">数据: 加载中...</div>
+        </div>
+    </div>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script>
+        // 全局变量
+        let scene, camera, renderer, controls;
+        let gprMesh, gprData, currentRenderMode = 'texture';
+        let colorMaps = {};
+
+        // 初始化Three.js场景
+        function init() {
+            // 场景
+            scene = new THREE.Scene();
+            scene.background = new THREE.Color(0x111111);
+
+            // 相机
+            camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+            camera.position.set(5, 5, 5);
+
+            // 渲染器
+            renderer = new THREE.WebGLRenderer({ antialias: true });
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            renderer.shadowMap.enabled = true;
+            renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+            document.getElementById('container').appendChild(renderer.domElement);
+
+            // 轨道控制器 (简化版)
+            setupControls();
+
+            // 添加光源
+            setupLights();
+
+            // 生成模拟GPR数据
+            generateGPRData();
+
+            // 创建色彩映射
+            createColorMaps();
+
+            // 初始渲染
+            createGPRVisualization();
+
+            // 开始渲染循环
+            animate();
+        }
+
+        function setupControls() {
+            // 简化的鼠标控制
+            let mouseDown = false;
+            let mouseX = 0, mouseY = 0;
+            
+            renderer.domElement.addEventListener('mousedown', (e) => {
+                mouseDown = true;
+                mouseX = e.clientX;
+                mouseY = e.clientY;
+            });
+
+            renderer.domElement.addEventListener('mousemove', (e) => {
+                if (!mouseDown) return;
+                
+                const deltaX = e.clientX - mouseX;
+                const deltaY = e.clientY - mouseY;
+                
+                // 旋转相机
+                const spherical = new THREE.Spherical();
+                spherical.setFromVector3(camera.position);
+                spherical.theta -= deltaX * 0.01;
+                spherical.phi += deltaY * 0.01;
+                spherical.phi = Math.max(0.1, Math.min(Math.PI - 0.1, spherical.phi));
+                
+                camera.position.setFromSpherical(spherical);
+                camera.lookAt(0, 0, 0);
+                
+                mouseX = e.clientX;
+                mouseY = e.clientY;
+            });
+
+            renderer.domElement.addEventListener('mouseup', () => {
+                mouseDown = false;
+            });
+
+            renderer.domElement.addEventListener('wheel', (e) => {
+                const scale = e.deltaY > 0 ? 1.1 : 0.9;
+                camera.position.multiplyScalar(scale);
+            });
+        }
+
+        function setupLights() {
+            // 环境光
+            const ambientLight = new THREE.AmbientLight(0x404040, 0.6);
+            scene.add(ambientLight);
+
+            // 定向光
+            const directionalLight = new THREE.DirectionalLight(0xffffff, 0.8);
+            directionalLight.position.set(5, 5, 5);
+            directionalLight.castShadow = true;
+            scene.add(directionalLight);
+        }
+
+        function generateGPRData() {
+            const width = 20000;
+            const height = 10000;
+            gprData = new Float32Array(width * height);
+
+            // 生成模拟GPR数据
+            for (let i = 0; i < height; i++) {
+                for (let j = 0; j < width; j++) {
+                    const x = j / width * 10;
+                    const y = i / height * 5;
+                    
+                    // 模拟多层反射
+                    let value = 0;
+                    value += Math.sin(x * 2) * Math.exp(-y * 0.5) * 0.8; // 浅层
+                    value += Math.sin(x * 0.5) * Math.exp(-y * 0.2) * 0.6; // 深层
+                    value += (Math.random() - 0.5) * 0.3; // 噪声
+                    
+                    // 添加点状异常
+                    if (Math.abs(x - 5) < 0.5 && Math.abs(y - 2) < 0.3) {
+                        value += 1.5;
+                    }
+                    
+                    gprData[i * width + j] = value;
+                }
+            }
+
+            document.getElementById('dataInfo').textContent = `数据: ${width}x${height} 点`;
+        }
+
+        function createColorMaps() {
+            // 灰度色彩映射
+            colorMaps.grayscale = new THREE.DataTexture(
+                new Uint8Array(256 * 4).map((_, i) => {
+                    const gray = Math.floor(i / 4);
+                    return i % 4 === 3 ? 255 : gray;
+                }),
+                256, 1, THREE.RGBAFormat
+            );
+
+            // Viridis色彩映射
+            const viridisColors = [
+                [68, 1, 84], [72, 40, 120], [62, 74, 137], [49, 104, 142],
+                [38, 130, 142], [31, 158, 137], [53, 183, 121], [109, 205, 89],
+                [180, 222, 44], [253, 231, 37]
+            ];
+            const viridisData = new Uint8Array(256 * 4);
+            for (let i = 0; i < 256; i++) {
+                const t = i / 255 * (viridisColors.length - 1);
+                const idx = Math.floor(t);
+                const frac = t - idx;
+                const c1 = viridisColors[Math.min(idx, viridisColors.length - 1)];
+                const c2 = viridisColors[Math.min(idx + 1, viridisColors.length - 1)];
+                
+                viridisData[i * 4] = c1[0] + (c2[0] - c1[0]) * frac;
+                viridisData[i * 4 + 1] = c1[1] + (c2[1] - c1[1]) * frac;
+                viridisData[i * 4 + 2] = c1[2] + (c2[2] - c1[2]) * frac;
+                viridisData[i * 4 + 3] = 255;
+            }
+            colorMaps.viridis = new THREE.DataTexture(viridisData, 256, 1, THREE.RGBAFormat);
+
+            // 地震色彩映射 (蓝-白-红)
+            const seismicData = new Uint8Array(256 * 4);
+            for (let i = 0; i < 256; i++) {
+                const t = i / 255;
+                if (t < 0.5) {
+                    seismicData[i * 4] = Math.floor(t * 2 * 255);
+                    seismicData[i * 4 + 1] = Math.floor(t * 2 * 255);
+                    seismicData[i * 4 + 2] = 255;
+                } else {
+                    seismicData[i * 4] = 255;
+                    seismicData[i * 4 + 1] = Math.floor((1 - t) * 2 * 255);
+                    seismicData[i * 4 + 2] = Math.floor((1 - t) * 2 * 255);
+                }
+                seismicData[i * 4 + 3] = 255;
+            }
+            colorMaps.seismic = new THREE.DataTexture(seismicData, 256, 1, THREE.RGBAFormat);
+
+            // 更新纹理
+            Object.values(colorMaps).forEach(texture => {
+                texture.needsUpdate = true;
+                texture.magFilter = THREE.LinearFilter;
+                texture.minFilter = THREE.LinearFilter;
+            });
+        }
+
+        function createGPRVisualization() {
+            // 移除旧的网格
+            if (gprMesh) {
+                scene.remove(gprMesh);
+            }
+
+            const width = 200;
+            const height = 100;
+
+            if (currentRenderMode === 'texture') {
+                createTextureVisualization(width, height);
+            } else if (currentRenderMode === 'heightmap') {
+                createHeightmapVisualization(width, height);
+            } else if (currentRenderMode === 'volume') {
+                createVolumeVisualization(width, height);
+            }
+        }
+
+        function createTextureVisualization(width, height) {
+            // 创建数据纹理
+            const dataTexture = createDataTexture(width, height);
+            
+            // 创建材质
+            const material = new THREE.ShaderMaterial({
+                uniforms: {
+                    dataTexture: { value: dataTexture },
+                    colorMap: { value: colorMaps.grayscale },
+                    gain: { value: 1.0 },
+                    opacity: { value: 1.0 }
+                },
+                vertexShader: `
+                    varying vec2 vUv;
+                    void main() {
+                        vUv = uv;
+                        gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+                    }
+                `,
+                fragmentShader: `
+                    uniform sampler2D dataTexture;
+                    uniform sampler2D colorMap;
+                    uniform float gain;
+                    uniform float opacity;
+                    varying vec2 vUv;
+                    
+                    void main() {
+                        float value = texture2D(dataTexture, vUv).r * gain;
+                        value = clamp((value + 1.0) * 0.5, 0.0, 1.0);
+                        vec4 color = texture2D(colorMap, vec2(value, 0.5));
+                        gl_FragColor = vec4(color.rgb, opacity);
+                    }
+                `,
+                transparent: true
+            });
+
+            // 创建几何体
+            const geometry = new THREE.PlaneGeometry(8, 4, 1, 1);
+            gprMesh = new THREE.Mesh(geometry, material);
+            gprMesh.userData = { material, dataTexture };
+            scene.add(gprMesh);
+        }
+
+        function createHeightmapVisualization(width, height) {
+            // 创建高度场几何体
+            const geometry = new THREE.PlaneGeometry(8, 4, width - 1, height - 1);
+            const vertices = geometry.attributes.position.array;
+
+            // 应用高度数据
+            for (let i = 0; i < height; i++) {
+                for (let j = 0; j < width; j++) {
+                    const idx = (i * width + j) * 3 + 2; // z坐标
+                    vertices[idx] = gprData[i * width + j] * 0.5;
+                }
+            }
+            geometry.attributes.position.needsUpdate = true;
+            geometry.computeVertexNormals();
+
+            // 创建数据纹理用于着色
+            const dataTexture = createDataTexture(width, height);
+            
+            const material = new THREE.MeshLambertMaterial({
+                map: dataTexture,
+                transparent: true
+            });
+
+            gprMesh = new THREE.Mesh(geometry, material);
+            gprMesh.userData = { material, dataTexture };
+            scene.add(gprMesh);
+        }
+
+        function createVolumeVisualization(width, height) {
+            // 简化的体渲染 - 使用多层透明平面
+            const group = new THREE.Group();
+            const layers = 20;
+
+            for (let layer = 0; layer < layers; layer++) {
+                const z = (layer / layers - 0.5) * 2;
+                const dataTexture = createDataTexture(width, height, layer / layers);
+                
+                const material = new THREE.MeshBasicMaterial({
+                    map: dataTexture,
+                    transparent: true,
+                    opacity: 0.1,
+                    side: THREE.DoubleSide
+                });
+
+                const geometry = new THREE.PlaneGeometry(8, 4);
+                const plane = new THREE.Mesh(geometry, material);
+                plane.position.z = z;
+                group.add(plane);
+            }
+
+            gprMesh = group;
+            scene.add(gprMesh);
+        }
+
+        function createDataTexture(width, height, layerOffset = 0) {
+            const data = new Uint8Array(width * height * 4);
+            
+            for (let i = 0; i < height; i++) {
+                for (let j = 0; j < width; j++) {
+                    const idx = (i * width + j) * 4;
+                    let value = gprData[i * width + j];
+                    
+                    // 为体渲染添加层偏移
+                    if (layerOffset > 0) {
+                        value *= Math.exp(-layerOffset * 2);
+                    }
+                    
+                    // 标准化到0-255
+                    const normalized = Math.floor(((value + 2) / 4) * 255);
+                    data[idx] = normalized;
+                    data[idx + 1] = normalized;
+                    data[idx + 2] = normalized;
+                    data[idx + 3] = 255;
+                }
+            }
+
+            const texture = new THREE.DataTexture(data, width, height, THREE.RGBAFormat);
+            texture.needsUpdate = true;
+            texture.magFilter = THREE.LinearFilter;
+            texture.minFilter = THREE.LinearFilter;
+            return texture;
+        }
+
+        // 控制函数
+        function setRenderMode(mode) {
+            currentRenderMode = mode;
+            createGPRVisualization();
+        }
+
+        function setColorMap(mapName) {
+            if (gprMesh && gprMesh.userData.material && gprMesh.userData.material.uniforms) {
+                gprMesh.userData.material.uniforms.colorMap.value = colorMaps[mapName];
+            }
+        }
+
+        function updateGain(value) {
+            document.getElementById('gainValue').textContent = value;
+            if (gprMesh && gprMesh.userData.material && gprMesh.userData.material.uniforms) {
+                gprMesh.userData.material.uniforms.gain.value = parseFloat(value);
+            }
+        }
+
+        function updateOpacity(value) {
+            document.getElementById('opacityValue').textContent = value;
+            if (gprMesh && gprMesh.userData.material) {
+                if (gprMesh.userData.material.uniforms) {
+                    gprMesh.userData.material.uniforms.opacity.value = parseFloat(value);
+                } else {
+                    gprMesh.userData.material.opacity = parseFloat(value);
+                }
+            }
+        }
+
+        function updateHeightScale(value) {
+            document.getElementById('heightValue').textContent = value;
+            if (currentRenderMode === 'heightmap' && gprMesh) {
+                const scale = parseFloat(value);
+                const geometry = gprMesh.geometry;
+                const vertices = geometry.attributes.position.array;
+                const width = 200;
+                const height = 100;
+                
+                for (let i = 0; i < height; i++) {
+                    for (let j = 0; j < width; j++) {
+                        const idx = (i * width + j) * 3 + 2;
+                        vertices[idx] = gprData[i * width + j] * 0.5 * scale;
+                    }
+                }
+                geometry.attributes.position.needsUpdate = true;
+                geometry.computeVertexNormals();
+            }
+        }
+
+        function animate() {
+            requestAnimationFrame(animate);
+            renderer.render(scene, camera);
+        }
+
+        // 窗口大小调整
+        window.addEventListener('resize', () => {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        });
+
+        // 初始化
+        init();
+    </script>
+</body>
+</html>
