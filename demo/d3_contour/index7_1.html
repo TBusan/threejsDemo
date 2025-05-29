@@ -381,7 +381,16 @@
 					this.contourData = contourData;
 					this.dataX = this.contourData.data.x; // X坐标数组
 					this.dataY = this.contourData.data.y; // Y坐标数组
-					this.dataValues = this.contourData.data.v; // 值的二维数组
+
+					const gridData = this.contourData.data.v
+
+					const clippedData = gridData.map(row => 
+  row.map(v => Math.max(zMin, Math.min(zMax, v)))
+);
+
+
+
+					this.dataValues = clippedData; // this.contourData.data.v; // 值的二维数组
 					this.zMin = this.contourData.data.zmin; // 最小值
 					this.zMax = this.contourData.data.zmax; // 最大值
 					
@@ -405,14 +414,14 @@
 					// 创建比例尺 - 使用准确的数据范围和比例
 					this.xScale = d3.scaleLinear()
 						.domain([this.xMin, this.xMax])
-						.range([-this.sceneWidth / 2, this.sceneWidth / 2]);
+						.range([0, this.sceneWidth]); // 从0开始，到sceneWidth结束
 
 					this.yScale = d3.scaleLinear()
 						.domain([this.yMin, this.yMax])
-						.range([this.sceneHeight / 2, -this.sceneHeight / 2]); // Y轴翻转
+						.range([0, this.sceneHeight]); // 从0开始，向下为负值
 					
 					// 特定阈值
-					this.specificThresholds = [-100,-50, 0, 50,100,150, 200,250, 300,350, 400,450, 500,550,600,650,700,750,800,850,900, 980];
+					this.specificThresholds = [0,200, 400, 600,800,1000, 1200,1400, 1600,1800, 2000,2200, 2400,2600,2800,3000,3200,3400,3600,3800];
 					
 					// 材质缓存，避免重复创建
 					this.materialCache = new Map();
@@ -501,30 +510,88 @@
 				// 根据数据值获取颜色
 				getTerrainColor(value) {
 					const localOriginColor = [
-						[-100, "rgba(126,84,255,255)"],
-						[-50, "rgba(99,66,255,255)"],
-						[0, "rgba(72,48,255,255)"],
-						[50, "rgba(45,30,255,255)"],
-						[100, "rgba(18,12,255,255)"],
-						[150, "rgba(0,15,240,255)"],
-						[200, "rgba(0,60,195,255)"],
-						[250, "rgba(0,105,150,255)"],
-						[300, "rgba(0,150,105,255)"],
-						[350, "rgba(0,195,60,255)"],
-						[400, "rgba(0,240,15,255)"],
-						[450, "rgba(30,255,0,255)"],
-						[500, "rgba(75,255,0,255)"],
-						[550, "rgba(120,255,0,255)"],
-						[600, "rgba(165,255,0,255)"],
-						[650, "rgba(210,255,0,255)"],
-						[700, "rgba(255,255,0,255)"],
-						[750, "rgba(255,228,0,255)"],
-						[800, "rgba(255,201,0,255)"],
-						[850, "rgba(255,174,0,255)"],
-						[900, "rgba(255,147,0,255)"],
-						[950, "rgba(255,120,0,255)"],
-						[1000, "rgba(255,96,0,255)"],
-					];
+                [
+                    200.000,
+                    "rgba(255, 0, 0, 1.00)"
+                ],
+                [
+                    400.000,
+                    "rgba(255, 24, 0, 1.00)"
+                ],
+                [
+                    400.000,
+                    "rgba(255, 55, 0, 1.00)"
+                ],
+                [
+                    800.000,
+                    "rgba(255, 87, 0, 1.00)"
+                ],
+                [
+                    1000.000,
+                    "rgba(255, 119, 0, 1.00)"
+                ],
+                [
+                    1200.000,
+                    "rgba(255, 143, 0, 1.00)"
+                ],
+                [
+                    1400.000,
+                    "rgba(255, 166, 0, 1.00)"
+                ],
+                [
+                    1600.000,
+                    "rgba(255, 188, 0, 1.00)"
+                ],
+                [
+                    1800.000,
+                    "rgba(255, 211, 0, 1.00)"
+                ],
+                [
+                    2000.000,
+                    "rgba(223, 219, 20, 1.00)"
+                ],
+                [
+                    2200.000,
+                    "rgba(184, 226, 44, 1.00)"
+                ],
+                [
+                    2400.000,
+                    "rgba(146, 232, 69, 1.00)"
+                ],
+                [
+                    2600.000,
+                    "rgba(108, 238, 93, 1.00)"
+                ],
+                [
+                    2800.000,
+                    "rgba(85, 206, 131, 1.00)"
+                ],
+                [
+                    3000.000,
+                    "rgba(65, 169, 172, 1.00)"
+                ],
+                [
+                    3200.000,
+                    "rgba(44, 132, 212, 1.00)"
+                ],
+                [
+                    3400.000,
+                    "rgba(23, 95, 253, 1.00)"
+                ],
+                [
+                    3600.000,
+                    "rgba(61, 78, 249, 1.00)"
+                ],
+                [
+                    3800.000,
+                    "rgba(102, 62, 242, 1.00)"
+                ],
+                ]
+
+				// [
+                //     3800.000,
+                //     "rgba(144, 47, 236, 1.00)"
+                // ]
 
 					const localOriginColorLen = localOriginColor.length;
 					const localOriginColorMin = localOriginColor[0][0];
@@ -572,6 +639,9 @@
 					// 创建等值线
 					this.createContours(contours);
 					
+					// 将等值线组的位置调整到左上角为(0,0)
+					this.contourGroup.position.set(0, 0, 0);
+					
 					// 返回包含所有等值线的组
 					return this.contourGroup;
 				}
@@ -584,6 +654,7 @@
 						if (mesh.geometry) mesh.geometry.dispose();
 						if (mesh.material) mesh.material.dispose();
 					});
+					
 					this.contourMeshes.length = 0;
 
 					// 清除现有的标注
@@ -630,8 +701,8 @@
 								}
 
 								// 使用比例尺将数据坐标转换到场景坐标
-								const sceneX = x; //this.xScale(x);
-								const sceneY = y; //this.yScale(y);
+								const sceneX = this.xScale(x);
+								const sceneY = this.yScale(y);
 
 								if (j === 0) {
 									shape.moveTo(sceneX, sceneY);
