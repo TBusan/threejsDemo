@@ -50,6 +50,9 @@
 					/>显示等值线轮廓</label
 				>
 			</div>
+			<div>
+				<label><input type="checkbox" id="showContourLabels" checked />显示标注值</label>
+			</div>
 		</div>
 		<div id="container"></div>
 
@@ -276,15 +279,8 @@
 			// 	}
 			// }
 
-			// // 解析颜色字符串为THREE.Color
-			// function parseColor(colorStr) {
-			// 	const rgba = colorStr.match(/\d+/g).map(Number);
-			// 	return new THREE.Color(rgba[0] / 255, rgba[1] / 255, rgba[2] / 255);
-			// }
-
 			// ===== Three.js 部分：3D 渲染 =====
 			const scene = new THREE.Scene();
-			scene.background = new THREE.Color('#ffffff');
 
 			// 设置摄像机
 			const camera = new THREE.PerspectiveCamera(
@@ -317,10 +313,10 @@
 			document.getElementById("container").appendChild(stats.domElement);
 
 			// 添加光源
-			const ambientLight = new THREE.AmbientLight(0xffffff, 0.6);
+			const ambientLight = new THREE.AmbientLight(0xffffff, 1.0); // 增强环境光
 			scene.add(ambientLight);
 
-			const directionalLight = new THREE.DirectionalLight(0xffffff, 0.8);
+			const directionalLight = new THREE.DirectionalLight(0xffffff, 1.2); // 增强方向光
 			directionalLight.position.set(1, 1, 1);
 			scene.add(directionalLight);
 			
@@ -372,7 +368,7 @@
 					// 默认选项
 					this.options = {
 						showContourLines: true,
-						showContourLabels: false,
+						showContourLabels: true,
 						smooth: true,
 						...options
 					};
@@ -479,26 +475,28 @@
 
 					let material;
 					if (isLine) {
-						// 检查是否是特定轮廓值（100,200,300等）
+						// 检查是否是特定轮廓值
 						const isSpecificContour = this.specificThresholds.includes(
 							parseFloat(renderIndex)
 						);
-
+						
+						// 使用黑色线条，增强对比度
 						material = new THREE.LineBasicMaterial({
-							color: color,
-							linewidth: isSpecificContour ? 3 : 1,
+							color: 0x000000, // 黑色线条
+							linewidth: isSpecificContour ? 2 : 1,
 							depthTest: false,
 							depthWrite: false,
-							transparent: true,
-							opacity: isSpecificContour ? 1.0 : 0.8,
+							transparent: false, // 移除透明度
+							opacity: 1.0,      // 完全不透明
 						});
 					} else {
+						// 增强填充区域的饱和度
 						material = new THREE.MeshBasicMaterial({
 							color: color,
-							transparent: true,
-							opacity: 1.0,
+							transparent: false, // 移除透明度
+							opacity: 1.0,      // 完全不透明
 							side: THREE.DoubleSide,
-							depthWrite: false,
+							depthWrite: true,  // 启用深度写入
 							depthTest: true,
 						});
 					}
@@ -614,10 +612,34 @@
 					}
 				}
 				
-				// 解析颜色字符串为THREE.Color
+				// 改进parseColor方法，确保正确解析颜色
 				parseColor(colorStr) {
-					const rgba = colorStr.match(/\d+/g).map(Number);
-					return new THREE.Color(rgba[0] / 255, rgba[1] / 255, rgba[2] / 255);
+					// 检查是否是rgba格式
+					const rgbaMatch = colorStr.match(/rgba\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)\s*,\s*([0-9.]+)\s*\)/);
+					if (rgbaMatch) {
+						const r = parseInt(rgbaMatch[1]) / 255;
+						const g = parseInt(rgbaMatch[2]) / 255;
+						const b = parseInt(rgbaMatch[3]) / 255;
+						// 增强饱和度
+						return new THREE.Color(
+							Math.min(1.0, r * 1.2), 
+							Math.min(1.0, g * 1.2), 
+							Math.min(1.0, b * 1.2)
+						);
+					}
+					
+					// 如果不是rgba格式，尝试其他格式
+					const rgba = colorStr.match(/\d+/g);
+					if (rgba && rgba.length >= 3) {
+						return new THREE.Color(
+							Math.min(1.0, parseInt(rgba[0]) / 255 * 1.2),
+							Math.min(1.0, parseInt(rgba[1]) / 255 * 1.2),
+							Math.min(1.0, parseInt(rgba[2]) / 255 * 1.2)
+						);
+					}
+					
+					// 默认返回白色
+					return new THREE.Color(1, 1, 1);
 				}
 				
 				// 初始化并创建等值线
@@ -783,13 +805,13 @@
 							// 添加到组
 							this.contourGroup.add(mesh);
 							this.contourMeshes.push(mesh);
-
+							const isSpecificValue = this.specificThresholds.includes(
+									contour.value
+								);
 							// 如果需要显示等值线轮廓
 							if (this.options.showContourLines) {
 								// 检查是否是特定值的等值线
-								const isSpecificValue = this.specificThresholds.includes(
-									contour.value
-								);
+							
 
 								// 创建线条几何体，使用相同的形状确保与面完全匹配
 								const lineGeometry = new THREE.EdgesGeometry(geometry);
@@ -807,6 +829,57 @@
 								// 添加到组
 								this.contourGroup.add(line);
 								this.contourMeshes.push(line);
+							}
+
+							// 如果需要显示等值线标注
+							if (this.options.showContourLabels && isSpecificValue) {
+								// 为每个多边形找到一个合适的标注点
+								// 这里我们简单地使用多边形的一个顶点，在实际应用中可以计算多边形的质心
+								const labelPosition = this.findLabelPosition(polygon);
+								
+								if (labelPosition) {
+									// 创建标注
+									const canvas = document.createElement('canvas');
+									const context = canvas.getContext('2d');
+									canvas.width = 64;
+									canvas.height = 32;
+									
+									// 设置文本样式
+									context.font = 'bold 24px Arial';
+									context.fillStyle = 'white';
+									context.textAlign = 'center';
+									context.textBaseline = 'middle';
+									
+									// 绘制轮廓以增强可读性
+									context.strokeStyle = 'black';
+									context.lineWidth = 4;
+									context.strokeText(contour.value, canvas.width/2, canvas.height/2);
+									
+									// 绘制文本
+									context.fillText(contour.value, canvas.width/2, canvas.height/2);
+									
+									// 创建纹理
+									const texture = new THREE.CanvasTexture(canvas);
+									texture.minFilter = THREE.LinearFilter;
+									
+									// 创建材质
+									const spriteMaterial = new THREE.SpriteMaterial({
+										map: texture,
+										sizeAttenuation: false,
+										depthTest: false,
+										depthWrite: false
+									});
+									
+									// 创建精灵并设置位置
+									const sprite = new THREE.Sprite(spriteMaterial);
+									sprite.position.set(labelPosition.x, labelPosition.y, zOffset + 0.002); // 确保标注在线条之上
+									sprite.scale.set(0.1, 0.05, 1); // 调整标注大小
+									sprite.renderOrder = i + sortedContours.length * 2; // 确保标注在最上层
+									
+									// 添加到组
+									this.contourGroup.add(sprite);
+									this.contourLabels.push(sprite);
+								}
 							}
 						}
 					}
@@ -893,12 +966,42 @@
 						aspectRatio: this.dataAspectRatio
 					};
 				}
+
+				// 添加 findLabelPosition 方法
+				findLabelPosition(polygon) {
+					// 确保多边形有足够的点
+					if (!polygon || !polygon[0] || polygon[0].length < 3) {
+						return null;
+					}
+					
+					// 使用多边形的中间点作为标注位置
+					// 在实际应用中可以使用多边形的质心或边界框的中心
+					const midIndex = Math.floor(polygon[0].length / 2);
+					const point = polygon[0][midIndex];
+					
+					if (!point || point.length < 2) {
+						return null;
+					}
+					
+					const [x, y] = point;
+					
+					// 检查坐标值是否有效
+					if (x === undefined || y === undefined || isNaN(x) || isNaN(y)) {
+						return null;
+					}
+					
+					// 返回场景坐标
+					return {
+						x: this.xScale(x),
+						y: this.yScale(y)
+					};
+				}
 			}
 
 			// 创建Contour实例并初始化
 			const contourRenderer = new Contour({
 				showContourLines: true,
-				showContourLabels: false,
+				showContourLabels: true,
 				smooth: true
 			});
 			
@@ -914,6 +1017,13 @@
 					// 更新contour选项并重新生成
 					contourRenderer.toggleContourLines(event.target.checked);
 				});
+
+			// 添加UI事件监听
+			document.getElementById("showContourLabels").addEventListener("change", (event) => {
+				// 更新contour选项
+				contourRenderer.options.showContourLabels = event.target.checked;
+				contourRenderer.updateOptions();
+			});
 
 			// 窗口大小调整处理
 			window.addEventListener("resize", () => {
