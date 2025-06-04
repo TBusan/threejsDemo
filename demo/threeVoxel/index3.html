@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>三维数据二维剖面等值线可视化</title>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <!-- <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r146/three.min.js"></script> -->
     <style>
         body {
             margin: 0;
@@ -126,6 +126,17 @@
                 <button id="clearLine">清除线段</button>
                 <button id="extractProfile">提取剖面数据</button>
             </div>
+            
+            <div class="control-group">
+                <button id="toggleVolume">切换体积渲染</button>
+                <label>体积渲染阈值:</label>
+                <input type="range" id="volumeThreshold" min="0" max="100" value="15">
+                <span id="thresholdValue">0.15</span>
+                
+                <label>体积渲染不透明度:</label>
+                <input type="range" id="volumeAlpha" min="0" max="100" value="90">
+                <span id="alphaValue">0.90</span>
+            </div>
         </div>
         
         <div id="info">
@@ -137,8 +148,20 @@
         
         <div id="canvas-container"></div>
     </div>
-
-    <script>
+	<script type="importmap">
+			{
+				"imports": {
+					"three": "../../build/three.module.js",
+					"three/addons/": "../../examples/jsm/",
+					"three-tile": "../../threetiles/tile.js",
+					"three-tile-plugin": "../../threetiles/plugin.js"
+				}
+			}
+	</script>
+    <script type="module">
+        import * as THREE from "three";
+		import { OrbitControls } from "three/addons/controls/OrbitControls.js";
+		import Stats from "three/addons/libs/stats.module.js";
         // 全局变量
         let scene, camera, renderer, controls;
         let dataPoints = [];
@@ -151,6 +174,9 @@
         let linePoints = [];
         let lineMesh = null;
         let raycaster, mouse;
+        let volumeMesh = null;
+        let volumeTexture = null;
+        let volumeRenderingActive = false;
         
         // 数据范围
         let dataRange = {
@@ -169,12 +195,24 @@
             camera.position.set(20, 20, 20);
             camera.lookAt(0, 0, 0);
             
-            renderer = new THREE.WebGLRenderer({ antialias: true });
+            // 确保使用WebGL2
+            renderer = new THREE.WebGLRenderer({ 
+                antialias: true,
+                powerPreference: "high-performance", 
+                alpha: true
+            });
             renderer.setSize(window.innerWidth, window.innerHeight);
             document.getElementById('canvas-container').appendChild(renderer.domElement);
+
+            // 检查WebGL2是否可用
+            if (!renderer.capabilities.isWebGL2) {
+                alert('您的浏览器不支持WebGL2，体积渲染功能可能无法工作');
+            }
             
-            // 添加简单的轨道控制
-            setupSimpleControls();
+            // 使用OrbitControls替换简单控制
+            controls = new OrbitControls(camera, renderer.domElement);
+            controls.enableDamping = true;
+            controls.dampingFactor = 0.25;
             
             // 添加坐标轴
             addCoordinateAxes();
@@ -190,136 +228,9 @@
             // 初始化射线投射器
             raycaster = new THREE.Raycaster();
             mouse = new THREE.Vector2();
-        }
 
-        // 简单的轨道控制实现
-        function setupSimpleControls() {
-            let isDragging = false;
-            let previousMousePosition = { x: 0, y: 0 };
-            let isRightClick = false;
-            
-            renderer.domElement.addEventListener('mousedown', (e) => {
-                if (isLineMode && e.button === 0) {
-                    handleLineClick(e);
-                    return;
-                }
-                
-                isDragging = true;
-                isRightClick = e.button === 2;
-                previousMousePosition = { x: e.clientX, y: e.clientY };
-            });
-            
-            renderer.domElement.addEventListener('mousemove', (e) => {
-                if (!isDragging) return;
-                
-                const deltaX = e.clientX - previousMousePosition.x;
-                const deltaY = e.clientY - previousMousePosition.y;
-                
-                if (isRightClick) {
-                    // 平移
-                    const panSpeed = 0.01;
-                    camera.position.x -= deltaX * panSpeed;
-                    camera.position.y += deltaY * panSpeed;
-                } else {
-                    // 旋转
-                    const rotationSpeed = 0.005;
-                    const spherical = new THREE.Spherical();
-                    spherical.setFromVector3(camera.position);
-                    spherical.theta -= deltaX * rotationSpeed;
-                    spherical.phi += deltaY * rotationSpeed;
-                    spherical.phi = Math.max(0.1, Math.min(Math.PI - 0.1, spherical.phi));
-                    camera.position.setFromSpherical(spherical);
-                    camera.lookAt(0, 0, 0);
-                }
-                
-                previousMousePosition = { x: e.clientX, y: e.clientY };
-            });
-            
-            renderer.domElement.addEventListener('mouseup', () => {
-                isDragging = false;
-                isRightClick = false;
-            });
-            
-            renderer.domElement.addEventListener('wheel', (e) => {
-                const zoomSpeed = 0.1;
-                const factor = e.deltaY > 0 ? 1 + zoomSpeed : 1 - zoomSpeed;
-                camera.position.multiplyScalar(factor);
-            });
-            
-            renderer.domElement.addEventListener('contextmenu', (e) => e.preventDefault());
-        }
-
-        // 处理线段绘制点击
-        function handleLineClick(event) {
-            mouse.x = (event.clientX / window.innerWidth) * 2 - 1;
-            mouse.y = -(event.clientY / window.innerHeight) * 2 + 1;
-            
-            raycaster.setFromCamera(mouse, camera);
-            
-            // 创建XY平面用于射线交互 (Z=0平面)
-            const planeGeometry = new THREE.PlaneGeometry(
-                dataRange.x.max - dataRange.x.min,
-                dataRange.y.max - dataRange.y.min
-            );
-            const planeMaterial = new THREE.MeshBasicMaterial({ 
-                transparent: true, 
-                opacity: 0 
-            });
-            const plane = new THREE.Mesh(planeGeometry, planeMaterial);
-            plane.rotation.x = -Math.PI / 2; // 放置在XY平面(Z=0)
-            
-            const intersects = raycaster.intersectObject(plane);
-            
-            if (intersects.length > 0) {
-                const point = intersects[0].point;
-                linePoints.push({ x: point.x, y: point.z }); // 注意坐标转换
-                
-                if (linePoints.length === 2) {
-                    createLineMesh();
-                } else if (linePoints.length > 2) {
-                    // 重新开始绘制
-                    linePoints = [{ x: point.x, y: point.z }];
-                    if (lineMesh) {
-                        scene.remove(lineMesh);
-                        lineMesh = null;
-                    }
-                }
-            }
-        }
-
-        // 创建线段网格
-        function createLineMesh() {
-            if (lineMesh) {
-                scene.remove(lineMesh);
-            }
-            
-            const geometry = new THREE.BufferGeometry();
-            const positions = new Float32Array([
-                linePoints[0].x, linePoints[0].y, 0, // 在XY平面(Z=0)上绘制
-                linePoints[1].x, linePoints[1].y, 0
-            ]);
-            
-            geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
-            
-            const material = new THREE.LineBasicMaterial({ 
-                color: 0xff0000, 
-                linewidth: 4
-            });
-            
-            lineMesh = new THREE.Line(geometry, material);
-            scene.add(lineMesh);
-            
-            // 添加端点标记
-            const pointGeometry = new THREE.SphereGeometry(0.2, 8, 8);
-            const pointMaterial = new THREE.MeshBasicMaterial({ color: 0xff0000 });
-            
-            const point1 = new THREE.Mesh(pointGeometry, pointMaterial);
-            point1.position.set(linePoints[0].x, linePoints[0].y, 0);
-            lineMesh.add(point1);
-            
-            const point2 = new THREE.Mesh(pointGeometry, pointMaterial);
-            point2.position.set(linePoints[1].x, linePoints[1].y, 0);
-            lineMesh.add(point2);
+            // 添加线段绘制事件监听
+            setupLineDrawingListeners();
         }
 
         // 添加坐标轴
@@ -417,6 +328,7 @@
             updateDataInfo();
             displayDataPoints();
             updateContour();
+            createVolumeRendering(); // 创建体积渲染
         }
 
         // 更新数据信息显示
@@ -743,6 +655,108 @@
             alert(`已提取线段剖面数据，共${profileData.length}个采样点，请查看控制台`);
         }
 
+        // 线段绘制监听器
+        function setupLineDrawingListeners() {
+            renderer.domElement.addEventListener('mousedown', (e) => {
+                if (isLineMode && e.button === 0) {
+                    handleLineClick(e);
+                }
+            });
+            
+            renderer.domElement.addEventListener('contextmenu', (e) => e.preventDefault());
+        }
+        
+        // 处理线段绘制点击
+        function handleLineClick(event) {
+            mouse.x = (event.clientX / window.innerWidth) * 2 - 1;
+            mouse.y = -(event.clientY / window.innerHeight) * 2 + 1;
+            
+            raycaster.setFromCamera(mouse, camera);
+            
+            // 创建XY平面用于射线交互 (Z=0平面)
+            const planeGeometry = new THREE.PlaneGeometry(
+                dataRange.x.max - dataRange.x.min,
+                dataRange.y.max - dataRange.y.min
+            );
+            const planeMaterial = new THREE.MeshBasicMaterial({ 
+                transparent: true, 
+                opacity: 0 
+            });
+            const plane = new THREE.Mesh(planeGeometry, planeMaterial);
+            plane.rotation.x = -Math.PI / 2; // 放置在XY平面(Z=0)
+            
+            const intersects = raycaster.intersectObject(plane);
+            
+            if (intersects.length > 0) {
+                const point = intersects[0].point;
+                linePoints.push({ x: point.x, y: point.z }); // 注意坐标转换
+                
+                if (linePoints.length === 2) {
+                    createLineMesh();
+                } else if (linePoints.length > 2) {
+                    // 重新开始绘制
+                    linePoints = [{ x: point.x, y: point.z }];
+                    if (lineMesh) {
+                        scene.remove(lineMesh);
+                        lineMesh = null;
+                    }
+                }
+            }
+        }
+        
+        // 创建线段网格
+        function createLineMesh() {
+            if (lineMesh) {
+                scene.remove(lineMesh);
+            }
+            
+            const geometry = new THREE.BufferGeometry();
+            const positions = new Float32Array([
+                linePoints[0].x, linePoints[0].y, 0, // 在XY平面(Z=0)上绘制
+                linePoints[1].x, linePoints[1].y, 0
+            ]);
+            
+            geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+            
+            const material = new THREE.LineBasicMaterial({ 
+                color: 0xff0000, 
+                linewidth: 4
+            });
+            
+            lineMesh = new THREE.Line(geometry, material);
+            scene.add(lineMesh);
+            
+            // 添加端点标记
+            const pointGeometry = new THREE.SphereGeometry(0.2, 8, 8);
+            const pointMaterial = new THREE.MeshBasicMaterial({ color: 0xff0000 });
+            
+            const point1 = new THREE.Mesh(pointGeometry, pointMaterial);
+            point1.position.set(linePoints[0].x, linePoints[0].y, 0);
+            lineMesh.add(point1);
+            
+            const point2 = new THREE.Mesh(pointGeometry, pointMaterial);
+            point2.position.set(linePoints[1].x, linePoints[1].y, 0);
+            lineMesh.add(point2);
+        }
+        
+        // 修改toggleMode函数以处理OrbitControls和绘图模式的切换
+        function toggleDrawMode() {
+            isLineMode = !isLineMode;
+            const button = document.getElementById('toggleMode');
+            
+            if (isLineMode) {
+                button.textContent = '切换到查看模式';
+                button.classList.add('active');
+                // 在绘图模式下禁用轨道控制器
+                controls.enabled = false;
+            } else {
+                button.textContent = '切换到线段模式';
+                button.classList.remove('active');
+                // 在查看模式下启用轨道控制器
+                controls.enabled = true;
+            }
+        }
+        
         // 事件监听器
         function setupEventListeners() {
             document.getElementById('planeSelect').addEventListener('change', (e) => {
@@ -770,17 +784,7 @@
                 }
             });
             
-            document.getElementById('toggleMode').addEventListener('click', () => {
-                isLineMode = !isLineMode;
-                const button = document.getElementById('toggleMode');
-                if (isLineMode) {
-                    button.textContent = '切换到查看模式';
-                    button.classList.add('active');
-                } else {
-                    button.textContent = '切换到线段模式';
-                    button.classList.remove('active');
-                }
-            });
+            document.getElementById('toggleMode').addEventListener('click', toggleDrawMode);
             
             document.getElementById('clearLine').addEventListener('click', () => {
                 linePoints = [];
@@ -791,11 +795,27 @@
             });
             
             document.getElementById('extractProfile').addEventListener('click', extractProfileData);
+            
+            // 体积渲染控制
+            document.getElementById('toggleVolume').addEventListener('click', toggleVolumeRendering);
+            
+            document.getElementById('volumeThreshold').addEventListener('input', (e) => {
+                const threshold = e.target.value / 100;
+                document.getElementById('thresholdValue').textContent = threshold.toFixed(2);
+                updateVolumeThreshold(threshold);
+            });
+            
+            document.getElementById('volumeAlpha').addEventListener('input', (e) => {
+                const alpha = e.target.value / 100;
+                document.getElementById('alphaValue').textContent = alpha.toFixed(2);
+                updateVolumeAlpha(alpha);
+            });
         }
 
         // 动画循环
         function animate() {
             requestAnimationFrame(animate);
+            if (controls) controls.update(); // 更新轨道控制
             renderer.render(scene, camera);
         }
 
@@ -818,6 +838,240 @@
 
         // 启动应用
         init();
+
+        // 体素渲染相关函数
+        function createVolumeRendering() {
+            if (volumeMesh) {
+                scene.remove(volumeMesh);
+                volumeMesh = null;
+            }
+
+            if (dataPoints.length === 0) return;
+
+            // 确定体素尺寸
+            const size = 64; // 体素纹理尺寸
+            
+            // 创建3D纹理数据
+            const data = new Uint8Array(size * size * size);
+            
+            // 确定数据边界
+            const xMin = dataRange.x.min;
+            const xMax = dataRange.x.max;
+            const yMin = dataRange.y.min;
+            const yMax = dataRange.y.max;
+            const zMin = dataRange.z.min;
+            const zMax = dataRange.z.max;
+            const vMin = Math.min(...dataPoints.map(p => p.v));
+            const vMax = Math.max(...dataPoints.map(p => p.v));
+            
+            // 初始化数据为0
+            data.fill(0);
+            
+            // 将点数据填充到体素网格
+            dataPoints.forEach(point => {
+                // 计算在体素网格中的位置
+                const ix = Math.floor((point.x - xMin) / (xMax - xMin) * (size - 1));
+                const iy = Math.floor((point.y - yMin) / (yMax - yMin) * (size - 1));
+                const iz = Math.floor((point.z - zMin) / (zMax - zMin) * (size - 1));
+                
+                if (ix >= 0 && ix < size && iy >= 0 && iy < size && iz >= 0 && iz < size) {
+                    // 归一化值到0-255
+                    const value = Math.floor(((point.v - vMin) / (vMax - vMin)) * 255);
+                    data[iz * size * size + iy * size + ix] = value;
+                }
+            });
+            
+            // 在体素网格中进行简单的高斯模糊以填充空隙
+            const blurredData = new Uint8Array(size * size * size);
+            for (let z = 1; z < size - 1; z++) {
+                for (let y = 1; y < size - 1; y++) {
+                    for (let x = 1; x < size - 1; x++) {
+                        let sum = 0;
+                        let count = 0;
+                        
+                        // 简单的3x3x3内核
+                        for (let dz = -1; dz <= 1; dz++) {
+                            for (let dy = -1; dy <= 1; dy++) {
+                                for (let dx = -1; dx <= 1; dx++) {
+                                    const val = data[(z + dz) * size * size + (y + dy) * size + (x + dx)];
+                                    sum += val;
+                                    count++;
+                                }
+                            }
+                        }
+                        
+                        blurredData[z * size * size + y * size + x] = sum / count;
+                    }
+                }
+            }
+            
+            // 创建3D纹理
+            const texture = new THREE.Data3DTexture(blurredData, size, size, size);
+            texture.format = THREE.RedFormat;
+            texture.type = THREE.UnsignedByteType;
+            texture.minFilter = THREE.LinearFilter;
+            texture.magFilter = THREE.LinearFilter;
+            texture.unpackAlignment = 1;
+            texture.needsUpdate = true;
+            
+            volumeTexture = texture;
+            
+            // 创建着色器材质
+            const material = new THREE.ShaderMaterial({
+                uniforms: {
+                    volTexture: { value: volumeTexture },
+                    uSize: { value: new THREE.Vector3(size, size, size) },
+                    uThreshold: { value: 0.15 },
+                    uAlpha: { value: 0.9 },
+                    uColorScale1: { value: new THREE.Vector3(0.0, 0.0, 1.0) }, // 蓝色
+                    uColorScale2: { value: new THREE.Vector3(1.0, 0.0, 0.0) }  // 红色
+                },
+                vertexShader: `#version 300 es
+                    in vec3 position;
+                    uniform mat4 modelViewMatrix;
+                    uniform mat4 projectionMatrix;
+                    out vec3 vLocalPos;
+                    
+                    void main() {
+                        vLocalPos = position;
+                        gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+                    }
+                `,
+                fragmentShader: `#version 300 es
+                    precision highp float;
+                    precision highp sampler3D;
+                    
+                    uniform sampler3D volTexture;
+                    uniform vec3 uSize;
+                    uniform float uThreshold;
+                    uniform float uAlpha;
+                    uniform vec3 uColorScale1;
+                    uniform vec3 uColorScale2;
+                    
+                    in vec3 vLocalPos;
+                    out vec4 fragColor;
+                    
+                    // 射线与AABB盒相交函数
+                    vec2 rayBoxIntersect(vec3 rayOrigin, vec3 rayDir, vec3 boxMin, vec3 boxMax) {
+                        vec3 invDir = 1.0 / rayDir;
+                        vec3 tMin = (boxMin - rayOrigin) * invDir;
+                        vec3 tMax = (boxMax - rayOrigin) * invDir;
+                        vec3 t1 = min(tMin, tMax);
+                        vec3 t2 = max(tMin, tMax);
+                        float tNear = max(max(t1.x, t1.y), t1.z);
+                        float tFar = min(min(t2.x, t2.y), t2.z);
+                        return vec2(tNear, tFar);
+                    }
+                    
+                    void main() {
+                        // 初始化射线
+                        vec3 rayOrigin = vec3(0.0);
+                        vec3 rayDir = normalize(vLocalPos - rayOrigin);
+                        
+                        // 盒体范围为 [-0.5, 0.5]
+                        vec3 boxMin = vec3(-0.5);
+                        vec3 boxMax = vec3(0.5);
+                        
+                        // 计算射线与盒体相交
+                        vec2 tIntersect = rayBoxIntersect(rayOrigin, rayDir, boxMin, boxMax);
+                        
+                        if (tIntersect.x > tIntersect.y) {
+                            discard; // 射线未命中盒体
+                        }
+                        
+                        // 确保起点在盒子内部
+                        float tStart = max(tIntersect.x, 0.0);
+                        float tEnd = tIntersect.y;
+                        
+                        // 射线采样步长
+                        float stepSize = 1.0 / 100.0; // 采样步数
+                        
+                        // 累积颜色和不透明度
+                        vec4 accColor = vec4(0.0);
+                        
+                        // 沿射线采样
+                        for (float t = tStart; t < tEnd; t += stepSize) {
+                            vec3 pos = rayOrigin + rayDir * t;
+                            
+                            // 将位置映射到纹理坐标 [0, 1]
+                            vec3 texCoord = pos + 0.5;
+                            
+                            // 采样体素值 - WebGL2 的texture函数
+                            float value = texture(volTexture, texCoord).r;
+                            
+                            // 归一化采样值（从0-255到0-1）
+                            value = value / 255.0;
+                            
+                            // 跳过低于阈值的值
+                            if (value < uThreshold) continue;
+                            
+                            // 计算颜色和不透明度
+                            float alpha = value * uAlpha;
+                            
+                            // 颜色映射：低值为蓝色，高值为红色
+                            vec3 color = mix(uColorScale1, uColorScale2, value);
+                            
+                            // 前向合成
+                            vec4 sample = vec4(color, alpha);
+                            accColor.rgb = accColor.rgb + (1.0 - accColor.a) * sample.a * sample.rgb;
+                            accColor.a = accColor.a + (1.0 - accColor.a) * sample.a;
+                            
+                            // 提前终止过于不透明的射线
+                            if (accColor.a >= 0.95) break;
+                        }
+                        
+                        // 输出最终颜色
+                        if (accColor.a == 0.0) discard;
+                        fragColor = accColor;
+                    }
+                `,
+                transparent: true,
+                side: THREE.BackSide,
+                glslVersion: THREE.GLSL3
+            });
+            
+            // 创建立方体几何体
+            const geometry = new THREE.BoxGeometry(1, 1, 1);
+            
+            // 创建网格
+            volumeMesh = new THREE.Mesh(geometry, material);
+            
+            // 缩放网格以匹配数据范围
+            const scaleX = Math.abs(xMax - xMin);
+            const scaleY = Math.abs(yMax - yMin);
+            const scaleZ = Math.abs(zMax - zMin);
+            volumeMesh.scale.set(scaleX, scaleY, scaleZ);
+            
+            scene.add(volumeMesh);
+            volumeRenderingActive = true;
+        }
+        
+        // 切换体积渲染
+        function toggleVolumeRendering() {
+            if (volumeRenderingActive) {
+                if (volumeMesh) {
+                    scene.remove(volumeMesh);
+                    volumeMesh = null;
+                }
+                volumeRenderingActive = false;
+            } else {
+                createVolumeRendering();
+            }
+        }
+        
+        // 更新体积渲染阈值
+        function updateVolumeThreshold(threshold) {
+            if (volumeMesh && volumeMesh.material) {
+                volumeMesh.material.uniforms.uThreshold.value = threshold;
+            }
+        }
+        
+        // 更新体积渲染不透明度
+        function updateVolumeAlpha(alpha) {
+            if (volumeMesh && volumeMesh.material) {
+                volumeMesh.material.uniforms.uAlpha.value = alpha;
+            }
+        }
     </script>
 </body>
 </html>
