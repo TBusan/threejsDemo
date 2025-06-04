@@ -640,7 +640,7 @@
 					this.createContours(contours);
 					
 					// 将等值线组的位置调整到左上角为(0,0)
-					this.contourGroup.position.set(0, 0, 0);
+					// this.contourGroup.position.set(0, 0, 0);
 					
 					// 返回包含所有等值线的组
 					return this.contourGroup;
@@ -904,9 +904,13 @@
 			
 			// 获取等值线组并添加到场景
 			const contourGroup = contourRenderer.init();
+			
+			
 			debugger
+		
 			scene.add(contourGroup);
-
+			const boxH = new THREE.BoxHelper(contourGroup)
+	        scene.add(boxH);
 			// UI事件监听
 			document
 				.getElementById("showContourLines")
