@@ -1,0 +1,458 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>三维热力图可视化</title>
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            background: #1a1a1a;
+            font-family: Arial, sans-serif;
+            overflow: hidden;
+        }
+        
+        #container {
+            position: relative;
+            width: 100vw;
+            height: 100vh;
+        }
+        
+        #controls {
+            position: absolute;
+            top: 10px;
+            left: 10px;
+            background: rgba(0, 0, 0, 0.8);
+            color: white;
+            padding: 15px;
+            border-radius: 8px;
+            z-index: 100;
+            max-width: 300px;
+        }
+        
+        .control-group {
+            margin-bottom: 15px;
+        }
+        
+        .control-group label {
+            display: block;
+            margin-bottom: 5px;
+            font-size: 12px;
+        }
+        
+        .control-group input, .control-group select {
+            width: 100%;
+            padding: 5px;
+            border: none;
+            border-radius: 4px;
+            background: #333;
+            color: white;
+        }
+        
+        .control-group button {
+            width: 100%;
+            padding: 8px;
+            border: none;
+            border-radius: 4px;
+            background: #4CAF50;
+            color: white;
+            cursor: pointer;
+            margin-top: 5px;
+        }
+        
+        .control-group button:hover {
+            background: #45a049;
+        }
+        
+        #info {
+            position: absolute;
+            bottom: 10px;
+            left: 10px;
+            background: rgba(0, 0, 0, 0.8);
+            color: white;
+            padding: 10px;
+            border-radius: 8px;
+            font-size: 12px;
+        }
+        
+        #canvas-container {
+            width: 100%;
+            height: 100%;
+        }
+    </style>
+</head>
+<body>
+    <div id="container">
+        <div id="controls">
+            <div class="control-group">
+                <button id="generateData">生成示例数据</button>
+            </div>
+            
+            <div class="control-group">
+                <label>高度缩放:</label>
+                <input type="range" id="heightScale" min="1" max="50" value="15">
+                <span id="heightScaleValue">15</span>
+            </div>
+            
+            <div class="control-group">
+                <label>网格分辨率:</label>
+                <input type="range" id="gridResolution" min="10" max="100" value="50">
+                <span id="resolutionValue">50 x 50</span>
+            </div>
+            
+            <div class="control-group">
+                <label>平滑处理:</label>
+                <input type="checkbox" id="smoothToggle" checked>
+                启用平滑
+            </div>
+
+            <div class="control-group">
+                <button id="loadSample1">样例1: 多峰面</button>
+                <button id="loadSample2">样例2: 波浪面</button>
+            </div>
+        </div>
+        
+        <div id="info">
+            <div>鼠标操作: 左键旋转，右键平移，滚轮缩放</div>
+            <div>热力图: 蓝色(低值) → 绿色 → 黄色 → 红色(高值)</div>
+            <div id="dataInfo"></div>
+        </div>
+        
+        <div id="canvas-container"></div>
+    </div>
+	<script type="importmap">
+			{
+				"imports": {
+					"three": "../../build/three.module.js",
+					"three/addons/": "../../examples/jsm/"
+				}
+			}
+	</script>
+    <script type="module">
+        import * as THREE from "three";
+        import { OrbitControls } from "three/addons/controls/OrbitControls.js";
+        
+        // 全局变量
+        let scene, camera, renderer, controls;
+        let heatmapMesh = null;
+        let gridHelper = null;
+        let gridSize = 50;
+        let heightScale = 15;
+        let smoothEnabled = true;
+        
+        // 初始化场景
+        function initScene() {
+            scene = new THREE.Scene();
+            scene.background = new THREE.Color(0x000000);
+            
+            camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 1000);
+            camera.position.set(0, 40, 60);
+            camera.lookAt(0, 0, 0);
+            
+            renderer = new THREE.WebGLRenderer({ 
+                antialias: true,
+                alpha: true
+            });
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            document.getElementById('canvas-container').appendChild(renderer.domElement);
+            
+            // 使用OrbitControls
+            controls = new OrbitControls(camera, renderer.domElement);
+            controls.enableDamping = true;
+            controls.dampingFactor = 0.25;
+            
+            // 添加灯光
+            const ambientLight = new THREE.AmbientLight(0x404040, 1.0);
+            scene.add(ambientLight);
+            
+            const directionalLight = new THREE.DirectionalLight(0xffffff, 0.8);
+            directionalLight.position.set(50, 100, 50);
+            scene.add(directionalLight);
+            
+            const directionalLight2 = new THREE.DirectionalLight(0xffffff, 0.5);
+            directionalLight2.position.set(-50, 80, -50);
+            scene.add(directionalLight2);
+        }
+
+        // 生成网格数据
+        function generateGridData(size, sampleFunction) {
+            const data = new Array(size);
+            
+            for (let i = 0; i < size; i++) {
+                data[i] = new Array(size);
+                for (let j = 0; j < size; j++) {
+                    const x = (i / (size - 1)) * 40 - 20;
+                    const z = (j / (size - 1)) * 40 - 20;
+                    const height = sampleFunction(x, z);
+                    data[i][j] = height;
+                }
+            }
+            
+            return data;
+        }
+        
+        // 默认示例数据函数 - 多峰面
+        function multiPeakFunction(x, z) {
+            return 2 * Math.sin(x * 0.3) * Math.cos(z * 0.2) + 
+                   3 * Math.cos(x * 0.2) * Math.sin(z * 0.3) + 
+                   2 * Math.exp(-((x*x + z*z) * 0.01)) +
+                   1.5 * Math.exp(-((x+10)*(x+10) + (z-10)*(z-10)) * 0.02) +
+                   2.5 * Math.exp(-((x-10)*(x-10) + (z+10)*(z+10)) * 0.015);
+        }
+        
+        // 波浪面示例
+        function waveSurfaceFunction(x, z) {
+            return 3 * Math.sin(x * 0.2) * Math.sin(z * 0.3) + 
+                  Math.cos(Math.sqrt(x*x + z*z) * 0.15) * 2;
+        }
+        
+        // 平滑处理数据
+        function smoothData(data, iterations = 1) {
+            const size = data.length;
+            const result = new Array(size);
+            
+            // 初始化结果数组
+            for (let i = 0; i < size; i++) {
+                result[i] = [...data[i]];
+            }
+            
+            for (let iter = 0; iter < iterations; iter++) {
+                const temp = new Array(size);
+                for (let i = 0; i < size; i++) {
+                    temp[i] = [...result[i]];
+                }
+                
+                for (let i = 1; i < size - 1; i++) {
+                    for (let j = 1; j < size - 1; j++) {
+                        // 计算周围8个点和自身的平均值
+                        let sum = 0;
+                        for (let di = -1; di <= 1; di++) {
+                            for (let dj = -1; dj <= 1; dj++) {
+                                sum += temp[i + di][j + dj];
+                            }
+                        }
+                        result[i][j] = sum / 9;
+                    }
+                }
+            }
+            
+            return result;
+        }
+        
+        // 创建热力图表面
+        function createHeatmapSurface(data) {
+            if (heatmapMesh) {
+                scene.remove(heatmapMesh);
+            }
+            
+            if (gridHelper) {
+                scene.remove(gridHelper);
+            }
+            
+            const size = data.length;
+            
+            // 找到数据的最小值和最大值用于颜色映射
+            let minVal = Infinity;
+            let maxVal = -Infinity;
+            
+            for (let i = 0; i < size; i++) {
+                for (let j = 0; j < size; j++) {
+                    minVal = Math.min(minVal, data[i][j]);
+                    maxVal = Math.max(maxVal, data[i][j]);
+                }
+            }
+            
+            // 创建平面几何体
+            const geometry = new THREE.PlaneGeometry(40, 40, size - 1, size - 1);
+            geometry.rotateX(-Math.PI / 2); // 使平面水平放置
+            
+            // 更新顶点位置和颜色
+            const positions = geometry.attributes.position;
+            const colors = new Float32Array(positions.count * 3);
+            
+            for (let i = 0; i < size; i++) {
+                for (let j = 0; j < size; j++) {
+                    const index = i * size + j;
+                    const height = data[i][j];
+                    
+                    // 设置高度
+                    positions.setY(index, height * heightScale);
+                    
+                    // 计算颜色（从蓝色到红色的热力图）
+                    const normalizedHeight = (height - minVal) / (maxVal - minVal);
+                    const color = getColorForValue(normalizedHeight);
+                    
+                    colors[index * 3] = color.r;
+                    colors[index * 3 + 1] = color.g;
+                    colors[index * 3 + 2] = color.b;
+                }
+            }
+            
+            // 添加颜色属性
+            geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+            
+            // 创建材质
+            const material = new THREE.MeshPhongMaterial({
+                vertexColors: true,
+                side: THREE.DoubleSide,
+                shininess: 50
+            });
+            
+            // 创建网格
+            heatmapMesh = new THREE.Mesh(geometry, material);
+            scene.add(heatmapMesh);
+            
+            // 添加网格线
+            gridHelper = new THREE.GridHelper(40, Math.max(4, Math.min(40, Math.floor(size/2))), 0x000000, 0x000000);
+            gridHelper.position.y = -0.1; // 稍微下移，避免z-fighting
+            scene.add(gridHelper);
+            
+            // 更新数据信息
+            document.getElementById('dataInfo').textContent = 
+                `数据范围: ${minVal.toFixed(2)} 到 ${maxVal.toFixed(2)}, 网格: ${size}x${size}`;
+        }
+        
+        // 根据数值获取颜色
+        function getColorForValue(value) {
+            const color = new THREE.Color();
+            
+            if (value < 0.33) {
+                // 蓝色到绿色
+                const t = value / 0.33;
+                color.setRGB(0, t, 1 - t/2);
+            } else if (value < 0.66) {
+                // 绿色到黄色
+                const t = (value - 0.33) / 0.33;
+                color.setRGB(t, 1, 0);
+            } else {
+                // 黄色到红色
+                const t = (value - 0.66) / 0.34;
+                color.setRGB(1, 1 - t, 0);
+            }
+            
+            return color;
+        }
+        
+        // 生成示例数据
+        function generateSampleData() {
+            let data = generateGridData(gridSize, multiPeakFunction);
+            
+            if (smoothEnabled) {
+                data = smoothData(data, 2);
+            }
+            
+            createHeatmapSurface(data);
+        }
+        
+        // 生成样本1 - 多峰面
+        function generateSample1() {
+            let data = generateGridData(gridSize, multiPeakFunction);
+            
+            if (smoothEnabled) {
+                data = smoothData(data, 2);
+            }
+            
+            createHeatmapSurface(data);
+        }
+        
+        // 生成样本2 - 波浪面
+        function generateSample2() {
+            let data = generateGridData(gridSize, waveSurfaceFunction);
+            
+            if (smoothEnabled) {
+                data = smoothData(data, 2);
+            }
+            
+            createHeatmapSurface(data);
+        }
+        
+        // 设置事件监听器
+        function setupEventListeners() {
+            document.getElementById('generateData').addEventListener('click', generateSampleData);
+            document.getElementById('loadSample1').addEventListener('click', generateSample1);
+            document.getElementById('loadSample2').addEventListener('click', generateSample2);
+            
+            document.getElementById('heightScale').addEventListener('input', (e) => {
+                heightScale = parseInt(e.target.value);
+                document.getElementById('heightScaleValue').textContent = heightScale;
+                
+                if (heatmapMesh) {
+                    generateSampleData(); // 重新生成数据以应用新的高度
+                }
+            });
+            
+            document.getElementById('gridResolution').addEventListener('input', (e) => {
+                gridSize = parseInt(e.target.value);
+                document.getElementById('resolutionValue').textContent = `${gridSize} x ${gridSize}`;
+                generateSampleData(); // 添加此行，实时更新网格分辨率
+            });
+            
+            document.getElementById('smoothToggle').addEventListener('change', (e) => {
+                smoothEnabled = e.target.checked;
+                generateSampleData(); // 添加此行，实时更新平滑效果
+            });
+            
+            // 允许通过拖放JSON文件加载数据
+            document.addEventListener('dragover', (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+            });
+            
+            document.addEventListener('drop', (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                
+                if (e.dataTransfer.files.length > 0) {
+                    const file = e.dataTransfer.files[0];
+                    const reader = new FileReader();
+                    
+                    reader.onload = (event) => {
+                        try {
+                            const data = JSON.parse(event.target.result);
+                            if (Array.isArray(data) && data.length > 0 && Array.isArray(data[0])) {
+                                createHeatmapSurface(data);
+                            } else {
+                                console.error('数据格式错误，需要提供二维数组形式的高度数据');
+                                alert('数据格式错误，需要提供二维数组形式的高度数据');
+                            }
+                        } catch (error) {
+                            console.error('无法解析JSON文件:', error);
+                            alert('无法解析JSON文件，请确保文件格式正确');
+                        }
+                    };
+                    
+                    reader.readAsText(file);
+                }
+            });
+        }
+
+        // 动画循环
+        function animate() {
+            requestAnimationFrame(animate);
+            if (controls) controls.update(); // 更新轨道控制
+            renderer.render(scene, camera);
+        }
+
+        // 窗口大小调整
+        function onWindowResize() {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        }
+
+        // 初始化应用
+        function init() {
+            initScene();
+            setupEventListeners();
+            generateSampleData();
+            animate();
+            
+            window.addEventListener('resize', onWindowResize);
+        }
+
+        // 启动应用
+        init();
+    </script>
+</body>
+</html>
