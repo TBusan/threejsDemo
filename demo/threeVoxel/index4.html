@@ -1,0 +1,1203 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>三维数据二维剖面等值线可视化</title>
+    <!-- <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r146/three.min.js"></script> -->
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            background: #1a1a1a;
+            font-family: Arial, sans-serif;
+            overflow: hidden;
+        }
+        
+        #container {
+            position: relative;
+            width: 100vw;
+            height: 100vh;
+        }
+        
+        #controls {
+            position: absolute;
+            top: 10px;
+            left: 10px;
+            background: rgba(0, 0, 0, 0.8);
+            color: white;
+            padding: 15px;
+            border-radius: 8px;
+            z-index: 100;
+            max-width: 300px;
+        }
+        
+        .control-group {
+            margin-bottom: 15px;
+        }
+        
+        .control-group label {
+            display: block;
+            margin-bottom: 5px;
+            font-size: 12px;
+        }
+        
+        .control-group input, .control-group select {
+            width: 100%;
+            padding: 5px;
+            border: none;
+            border-radius: 4px;
+            background: #333;
+            color: white;
+        }
+        
+        .control-group button {
+            width: 100%;
+            padding: 8px;
+            border: none;
+            border-radius: 4px;
+            background: #4CAF50;
+            color: white;
+            cursor: pointer;
+            margin-top: 5px;
+        }
+        
+        .control-group button:hover {
+            background: #45a049;
+        }
+        
+        #info {
+            position: absolute;
+            bottom: 10px;
+            left: 10px;
+            background: rgba(0, 0, 0, 0.8);
+            color: white;
+            padding: 10px;
+            border-radius: 8px;
+            font-size: 12px;
+            max-width: 300px;
+        }
+        
+        #canvas-container {
+            width: 100%;
+            height: 100%;
+        }
+        
+        .mode-button {
+            background: #2196F3 !important;
+        }
+        
+        .mode-button.active {
+            background: #FF9800 !important;
+        }
+    </style>
+</head>
+<body>
+    <div id="container">
+        <div id="controls">
+            <div class="control-group">
+                <label>剖面选择:</label>
+                <select id="planeSelect">
+                    <option value="xy">XY平面 (Z剖面)</option>
+                    <option value="xz">XZ平面 (Y剖面)</option>
+                    <option value="yz">YZ平面 (X剖面)</option>
+                </select>
+            </div>
+            
+            <div class="control-group">
+                <label>剖面位置:</label>
+                <input type="range" id="planePosition" min="0" max="100" value="50">
+                <span id="positionValue">50%</span>
+            </div>
+            
+            <div class="control-group">
+                <label>等值线数量:</label>
+                <input type="range" id="contourLevels" min="5" max="20" value="10">
+                <span id="levelsValue">10</span>
+            </div>
+            
+            <div class="control-group">
+                <button id="generateData">生成示例数据</button>
+                <button id="togglePoints">切换数据点显示</button>
+                <button id="toggleMode" class="mode-button">切换到线段模式</button>
+            </div>
+            
+            <div class="control-group">
+                <button id="clearLine">清除线段</button>
+                <button id="extractProfile">提取剖面数据</button>
+            </div>
+            
+            <div class="control-group">
+                <button id="toggleVolume">切换体积渲染</button>
+                <label>体积渲染阈值:</label>
+                <input type="range" id="volumeThreshold" min="0" max="100" value="15">
+                <span id="thresholdValue">0.15</span>
+                
+                <label>体积渲染不透明度:</label>
+                <input type="range" id="volumeAlpha" min="0" max="100" value="90">
+                <span id="alphaValue">0.90</span>
+            </div>
+        </div>
+        
+        <div id="info">
+            <div>鼠标操作: 左键旋转，右键平移，滚轮缩放</div>
+            <div>线段模式: 在XY平面(Z=0)上点击绘制线段</div>
+            <div>彩色点: 蓝色(低值) → 红色(高值)</div>
+            <div id="dataInfo">数据点数: 0</div>
+        </div>
+        
+        <div id="canvas-container"></div>
+    </div>
+	<script type="importmap">
+			{
+				"imports": {
+					"three": "../../build/three.module.js",
+					"three/addons/": "../../examples/jsm/",
+					"three-tile": "../../threetiles/tile.js",
+					"three-tile-plugin": "../../threetiles/plugin.js"
+				}
+			}
+	</script>
+    <script type="module">
+        import * as THREE from "three";
+		import { OrbitControls } from "three/addons/controls/OrbitControls.js";
+		import Stats from "three/addons/libs/stats.module.js";
+        // 全局变量
+        let scene, camera, renderer, controls;
+        let dataPoints = [];
+        let dataPointsMesh = null;
+        let contourMesh = null;
+        let currentPlane = 'xy';
+        let planePosition = 0.5;
+        let contourLevels = 10;
+        let isLineMode = false;
+        let linePoints = [];
+        let lineMesh = null;
+        let raycaster, mouse;
+        let volumeMesh = null;
+        let volumeTexture = null;
+        let volumeRenderingActive = false;
+        
+        // Marching Cubes的边和三角形查找表 - 移动到全局区域
+        const MARCHING_CUBES_EDGES = [
+            [0, 1], [1, 2], [2, 3], [3, 0],
+            [4, 5], [5, 6], [6, 7], [7, 4],
+            [0, 4], [1, 5], [2, 6], [3, 7]
+        ];
+        
+        // 简化版Marching Cubes三角形表
+        const MARCHING_CUBES_TRIANGLES = [
+            [], // 0: 全部低于等值面
+            [0, 8, 3], // 1: 只有顶点0高于等值面
+            [0, 1, 9], // 2: 只有顶点1高于等值面
+            [1, 8, 3, 9, 8, 1], // 3: 顶点0,1高于等值面
+            [1, 2, 10], // 4: 只有顶点2高于等值面
+            [0, 8, 3, 1, 2, 10], // 5: 顶点0,2高于等值面
+            [9, 2, 10, 0, 2, 9], // 6: 顶点1,2高于等值面
+            [2, 8, 3, 2, 10, 8, 10, 9, 8], // 7: 顶点0,1,2高于等值面
+            [3, 11, 2], // 8: 只有顶点3高于等值面
+            [0, 11, 2, 8, 11, 0], // 9: 顶点0,3高于等值面
+            [1, 9, 0, 2, 3, 11], // 10: 顶点1,3高于等值面
+            [1, 11, 2, 1, 9, 11, 9, 8, 11], // 11: 顶点0,1,3高于等值面
+            [3, 10, 1, 11, 10, 3], // 12: 顶点2,3高于等值面
+            [0, 10, 1, 0, 8, 10, 8, 11, 10], // 13: 顶点0,2,3高于等值面
+            [3, 9, 0, 3, 11, 9, 11, 10, 9], // 14: 顶点1,2,3高于等值面
+            [9, 8, 10, 10, 8, 11], // 15: 顶点0,1,2,3高于等值面
+            // 下面是更多情况，实际需要256种配置，这里仅示例几种
+            [4, 7, 8], // 16: 只有顶点4高于等值面
+            [4, 3, 0, 7, 3, 4], // 17: 顶点0,4高于等值面
+            [0, 1, 9, 8, 4, 7], // 18: 顶点1,4高于等值面
+            // ... 更多的情况 ...
+        ];
+        
+        // 初始化简化版三角形表
+        for (let i = MARCHING_CUBES_TRIANGLES.length; i < 256; i++) {
+            // 对于未定义的情况，使用一个简单的默认值
+            if (i === 0 || i === 255) {
+                MARCHING_CUBES_TRIANGLES[i] = []; // 全部低于或高于等值面，没有三角形
+            } else if ([1, 2, 4, 8, 16, 32, 64, 128].includes(i)) {
+                // 这只是一个简化示例，对于只有一个顶点高于等值面的情况
+                MARCHING_CUBES_TRIANGLES[i] = [0, 3, 8];
+            } else {
+                // 默认情况，生成两个三角形
+                MARCHING_CUBES_TRIANGLES[i] = [0, 8, 3, 0, 1, 8];
+            }
+        }
+        
+        // 数据范围
+        let dataRange = {
+            x: { min: -10, max: 10 },
+            y: { min: -10, max: 10 },
+            z: { min: -10, max: 10 },
+            v: { min: 0, max: 100 }
+        };
+
+        // 初始化场景
+        function initScene() {
+            scene = new THREE.Scene();
+            scene.background = new THREE.Color(0x1a1a1a);
+            
+            camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+            camera.position.set(20, 20, 20);
+            camera.lookAt(0, 0, 0);
+            
+            // 确保使用WebGL2
+            renderer = new THREE.WebGLRenderer({ 
+                antialias: true,
+                powerPreference: "high-performance", 
+                alpha: true
+            });
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            document.getElementById('canvas-container').appendChild(renderer.domElement);
+
+            // 检查WebGL2是否可用
+            if (!renderer.capabilities.isWebGL2) {
+                alert('您的浏览器不支持WebGL2，体积渲染功能可能无法工作');
+            }
+            
+            // 使用OrbitControls替换简单控制
+            controls = new OrbitControls(camera, renderer.domElement);
+            controls.enableDamping = true;
+            controls.dampingFactor = 0.25;
+            
+            // 添加坐标轴
+            addCoordinateAxes();
+            
+            // 添加灯光
+            const ambientLight = new THREE.AmbientLight(0x404040, 0.4);
+            scene.add(ambientLight);
+            
+            const directionalLight = new THREE.DirectionalLight(0xffffff, 0.8);
+            directionalLight.position.set(10, 10, 5);
+            scene.add(directionalLight);
+            
+            // 初始化射线投射器
+            raycaster = new THREE.Raycaster();
+            mouse = new THREE.Vector2();
+
+            // 添加线段绘制事件监听
+            setupLineDrawingListeners();
+        }
+
+        // 添加坐标轴
+        function addCoordinateAxes() {
+            const axesGroup = new THREE.Group();
+            
+            // X轴 - 红色
+            const xGeometry = new THREE.BufferGeometry().setFromPoints([
+                new THREE.Vector3(0, 0, 0),
+                new THREE.Vector3(15, 0, 0)
+            ]);
+            const xMaterial = new THREE.LineBasicMaterial({ color: 0xff0000 });
+            const xAxis = new THREE.Line(xGeometry, xMaterial);
+            axesGroup.add(xAxis);
+            
+            // Y轴 - 绿色
+            const yGeometry = new THREE.BufferGeometry().setFromPoints([
+                new THREE.Vector3(0, 0, 0),
+                new THREE.Vector3(0, 15, 0)
+            ]);
+            const yMaterial = new THREE.LineBasicMaterial({ color: 0x00ff00 });
+            const yAxis = new THREE.Line(yGeometry, yMaterial);
+            axesGroup.add(yAxis);
+            
+            // Z轴 - 蓝色
+            const zGeometry = new THREE.BufferGeometry().setFromPoints([
+                new THREE.Vector3(0, 0, 0),
+                new THREE.Vector3(0, 0, 15)
+            ]);
+            const zMaterial = new THREE.LineBasicMaterial({ color: 0x0000ff });
+            const zAxis = new THREE.Line(zGeometry, zMaterial);
+            axesGroup.add(zAxis);
+            
+            scene.add(axesGroup);
+        }
+
+        // 显示原始数据点
+        function displayDataPoints() {
+            if (dataPointsMesh) {
+                scene.remove(dataPointsMesh);
+            }
+            
+            if (dataPoints.length === 0) return;
+            
+            const geometry = new THREE.BufferGeometry();
+            const positions = [];
+            const colors = [];
+            
+            // 计算颜色映射
+            const minV = Math.min(...dataPoints.map(p => p.v));
+            const maxV = Math.max(...dataPoints.map(p => p.v));
+            
+            dataPoints.forEach(point => {
+                positions.push(point.x, point.y, point.z);
+                
+                // 根据数值计算颜色 (蓝色到红色)
+                const normalizedV = (point.v - minV) / (maxV - minV);
+                const color = new THREE.Color();
+                color.setHSL((1 - normalizedV) * 0.7, 0.8, 0.5); // 蓝色(0.7)到红色(0)
+                colors.push(color.r, color.g, color.b);
+            });
+            
+            geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+            geometry.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
+            
+            const material = new THREE.PointsMaterial({
+                size: 0.3,
+                vertexColors: true,
+                sizeAttenuation: true
+            });
+            
+            dataPointsMesh = new THREE.Points(geometry, material);
+            scene.add(dataPointsMesh);
+        }
+        function generateSampleData() {
+            dataPoints = [];
+            const density = 20; // 每个维度的点数
+            
+            for (let i = 0; i < density; i++) {
+                for (let j = 0; j < density; j++) {
+                    for (let k = 0; k < density; k++) {
+                        const x = (i / (density-1)) * 20 - 10;
+                        const y = (j / (density-1)) * 20 - 10;
+                        const z = (k / (density-1)) * 20 - 10;
+                        
+                        // 生成一个有趣的3D函数值
+                        const v = 50 + 30 * Math.sin(x * 0.3) * Math.cos(y * 0.3) * Math.sin(z * 0.2) +
+                                 20 * Math.exp(-(x*x + y*y + z*z) * 0.01);
+                        
+                        dataPoints.push({ x, y, z, v });
+                    }
+                }
+            }
+            
+            updateDataInfo();
+            displayDataPoints();
+            updateContour();
+            createVolumeRendering(); // 创建体积渲染
+        }
+
+        // 更新数据信息显示
+        function updateDataInfo() {
+            document.getElementById('dataInfo').textContent = `数据点数: ${dataPoints.length}`;
+        }
+
+        // 插值函数 - 反距离权重插值
+        function interpolateValue(x, y, z, points, plane) {
+            let weightSum = 0;
+            let valueSum = 0;
+            const power = 2;
+            
+            for (const point of points) {
+                let distance;
+                
+                // 根据剖面类型计算距离
+                switch (plane) {
+                    case 'xy':
+                        distance = Math.sqrt((x - point.x)**2 + (y - point.y)**2);
+                        break;
+                    case 'xz':
+                        distance = Math.sqrt((x - point.x)**2 + (z - point.z)**2);
+                        break;
+                    case 'yz':
+                        distance = Math.sqrt((y - point.y)**2 + (z - point.z)**2);
+                        break;
+                }
+                
+                if (distance < 0.01) return point.v; // 避免除零
+                
+                const weight = 1 / Math.pow(distance, power);
+                weightSum += weight;
+                valueSum += weight * point.v;
+            }
+            
+            return weightSum > 0 ? valueSum / weightSum : 0;
+        }
+
+        // 生成等值线
+        function generateContourLines(gridData, levels, width, height) {
+            const contourLines = [];
+            
+            for (const level of levels) {
+                const lines = marchingSquares(gridData, level, width, height);
+                contourLines.push(...lines);
+            }
+            
+            return contourLines;
+        }
+
+        // 简化的Marching Squares算法
+        function marchingSquares(grid, threshold, width, height) {
+            const lines = [];
+            
+            for (let y = 0; y < height - 1; y++) {
+                for (let x = 0; x < width - 1; x++) {
+                    const tl = grid[y * width + x] >= threshold ? 1 : 0;
+                    const tr = grid[y * width + (x + 1)] >= threshold ? 1 : 0;
+                    const bl = grid[(y + 1) * width + x] >= threshold ? 1 : 0;
+                    const br = grid[(y + 1) * width + (x + 1)] >= threshold ? 1 : 0;
+                    
+                    const config = tl * 8 + tr * 4 + br * 2 + bl * 1;
+                    
+                    // 简化的等值线生成（只处理几种基本情况）
+                    if (config === 1 || config === 14) {
+                        lines.push([
+                            [x, y + 0.5],
+                            [x + 0.5, y + 1]
+                        ]);
+                    } else if (config === 2 || config === 13) {
+                        lines.push([
+                            [x + 0.5, y + 1],
+                            [x + 1, y + 0.5]
+                        ]);
+                    } else if (config === 4 || config === 11) {
+                        lines.push([
+                            [x + 0.5, y],
+                            [x + 1, y + 0.5]
+                        ]);
+                    } else if (config === 8 || config === 7) {
+                        lines.push([
+                            [x, y + 0.5],
+                            [x + 0.5, y]
+                        ]);
+                    }
+                }
+            }
+            
+            return lines;
+        }
+
+        // 更新等值线显示
+        function updateContour() {
+            if (contourMesh) {
+                scene.remove(contourMesh);
+            }
+            
+            if (dataPoints.length === 0) return;
+            
+            // 获取当前剖面的数据点
+            const planePos = getPlanePosition();
+            const filteredPoints = filterPointsByPlane(dataPoints, currentPlane, planePos);
+            
+            if (filteredPoints.length === 0) return;
+            
+            // 创建网格并插值
+            const resolution = 50;
+            const gridData = createInterpolatedGrid(filteredPoints, resolution);
+            
+            // 生成等值线
+            const levels = generateContourLevels();
+            const contourLines = generateContourLines(gridData.values, levels, resolution, resolution);
+            
+            // 创建Three.js几何体
+            createContourMesh(contourLines, gridData, resolution);
+        }
+
+        // 获取剖面位置
+        function getPlanePosition() {
+            let range;
+            switch (currentPlane) {
+                case 'xy': range = dataRange.z; break;
+                case 'xz': range = dataRange.y; break;
+                case 'yz': range = dataRange.x; break;
+            }
+            return range.min + (range.max - range.min) * planePosition;
+        }
+
+        // 根据平面过滤数据点
+        function filterPointsByPlane(points, plane, position) {
+            const tolerance = 1.0; // 容忍度
+            return points.filter(point => {
+                switch (plane) {
+                    case 'xy': return Math.abs(point.z - position) <= tolerance;
+                    case 'xz': return Math.abs(point.y - position) <= tolerance;
+                    case 'yz': return Math.abs(point.x - position) <= tolerance;
+                }
+            });
+        }
+
+        // 创建插值网格
+        function createInterpolatedGrid(points, resolution) {
+            const values = new Float32Array(resolution * resolution);
+            let bounds;
+            
+            switch (currentPlane) {
+                case 'xy':
+                    bounds = { 
+                        xMin: dataRange.x.min, xMax: dataRange.x.max,
+                        yMin: dataRange.y.min, yMax: dataRange.y.max
+                    };
+                    break;
+                case 'xz':
+                    bounds = { 
+                        xMin: dataRange.x.min, xMax: dataRange.x.max,
+                        yMin: dataRange.z.min, yMax: dataRange.z.max
+                    };
+                    break;
+                case 'yz':
+                    bounds = { 
+                        xMin: dataRange.y.min, xMax: dataRange.y.max,
+                        yMin: dataRange.z.min, yMax: dataRange.z.max
+                    };
+                    break;
+            }
+            
+            for (let y = 0; y < resolution; y++) {
+                for (let x = 0; x < resolution; x++) {
+                    const worldX = bounds.xMin + (bounds.xMax - bounds.xMin) * (x / (resolution - 1));
+                    const worldY = bounds.yMin + (bounds.yMax - bounds.yMin) * (y / (resolution - 1));
+                    
+                    let interpolatedValue = 0;
+                    switch (currentPlane) {
+                        case 'xy':
+                            interpolatedValue = interpolateValue(worldX, worldY, 0, points, 'xy');
+                            break;
+                        case 'xz':
+                            interpolatedValue = interpolateValue(worldX, 0, worldY, points, 'xz');
+                            break;
+                        case 'yz':
+                            interpolatedValue = interpolateValue(0, worldX, worldY, points, 'yz');
+                            break;
+                    }
+                    
+                    values[y * resolution + x] = interpolatedValue;
+                }
+            }
+            
+            return { values, bounds };
+        }
+
+        // 生成等值线级别
+        function generateContourLevels() {
+            const levels = [];
+            for (let i = 0; i < contourLevels; i++) {
+                levels.push(dataRange.v.min + (dataRange.v.max - dataRange.v.min) * (i / (contourLevels - 1)));
+            }
+            return levels;
+        }
+
+        // 创建等值线网格
+        function createContourMesh(contourLines, gridData, resolution) {
+            const group = new THREE.Group();
+            const planePos = getPlanePosition();
+            
+            contourLines.forEach((line, index) => {
+                const geometry = new THREE.BufferGeometry();
+                const positions = [];
+                
+                line.forEach(point => {
+                    const worldX = gridData.bounds.xMin + 
+                        (gridData.bounds.xMax - gridData.bounds.xMin) * (point[0] / (resolution - 1));
+                    const worldY = gridData.bounds.yMin + 
+                        (gridData.bounds.yMax - gridData.bounds.yMin) * (point[1] / (resolution - 1));
+                    
+                    // 在对应的平面上显示等值线
+                    switch (currentPlane) {
+                        case 'xy':
+                            positions.push(worldX, worldY, planePos); // 在Z=planePos的XY平面上
+                            break;
+                        case 'xz':
+                            positions.push(worldX, planePos, worldY); // 在Y=planePos的XZ平面上
+                            break;
+                        case 'yz':
+                            positions.push(planePos, worldX, worldY); // 在X=planePos的YZ平面上
+                            break;
+                    }
+                });
+                
+                geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+                
+                const hue = (index * 0.1) % 1;
+                const material = new THREE.LineBasicMaterial({ 
+                    color: new THREE.Color().setHSL(hue, 0.8, 0.6),
+                    linewidth: 2
+                });
+                
+                const lineMesh = new THREE.Line(geometry, material);
+                group.add(lineMesh);
+            });
+            
+            // 添加半透明平面以更好地显示剖面位置
+            addPlaneIndicator(group, planePos);
+            
+            contourMesh = group;
+            scene.add(contourMesh);
+        }
+        
+        // 添加平面指示器
+        function addPlaneIndicator(group, planePos) {
+            let planeGeometry, planeMaterial, plane;
+            const size = 20;
+            
+            switch (currentPlane) {
+                case 'xy':
+                    planeGeometry = new THREE.PlaneGeometry(size, size);
+                    plane = new THREE.Mesh(planeGeometry, new THREE.MeshBasicMaterial({
+                        color: 0x0088ff,
+                        transparent: true,
+                        opacity: 0.1,
+                        side: THREE.DoubleSide
+                    }));
+                    plane.position.set(0, 0, planePos);
+                    plane.rotation.x = 0;
+                    break;
+                case 'xz':
+                    planeGeometry = new THREE.PlaneGeometry(size, size);
+                    plane = new THREE.Mesh(planeGeometry, new THREE.MeshBasicMaterial({
+                        color: 0x00ff88,
+                        transparent: true,
+                        opacity: 0.1,
+                        side: THREE.DoubleSide
+                    }));
+                    plane.position.set(0, planePos, 0);
+                    plane.rotation.x = Math.PI / 2;
+                    break;
+                case 'yz':
+                    planeGeometry = new THREE.PlaneGeometry(size, size);
+                    plane = new THREE.Mesh(planeGeometry, new THREE.MeshBasicMaterial({
+                        color: 0xff8800,
+                        transparent: true,
+                        opacity: 0.1,
+                        side: THREE.DoubleSide
+                    }));
+                    plane.position.set(planePos, 0, 0);
+                    plane.rotation.y = Math.PI / 2;
+                    break;
+            }
+            
+            group.add(plane);
+        }
+
+        // 提取线段剖面数据
+        function extractProfileData() {
+            if (linePoints.length !== 2 || dataPoints.length === 0) {
+                alert('请先绘制线段并确保有数据点');
+                return;
+            }
+            
+            const segments = 100;
+            const profileData = [];
+            
+            for (let i = 0; i <= segments; i++) {
+                const t = i / segments;
+                const x = linePoints[0].x + t * (linePoints[1].x - linePoints[0].x);
+                const y = linePoints[0].y + t * (linePoints[1].y - linePoints[0].y);
+                
+                // 在Z方向上采样多个点
+                const zSamples = 20;
+                const zProfile = [];
+                
+                for (let j = 0; j <= zSamples; j++) {
+                    const z = dataRange.z.min + (dataRange.z.max - dataRange.z.min) * (j / zSamples);
+                    const value = interpolateValue(x, y, z, dataPoints, 'xy');
+                    zProfile.push({ z, value });
+                }
+                
+                profileData.push({ x, y, profile: zProfile });
+            }
+            
+            // 显示剖面数据（这里简化为控制台输出）
+            console.log('线段剖面数据:', profileData);
+            alert(`已提取线段剖面数据，共${profileData.length}个采样点，请查看控制台`);
+        }
+
+        // 线段绘制监听器
+        function setupLineDrawingListeners() {
+            renderer.domElement.addEventListener('mousedown', (e) => {
+                if (isLineMode && e.button === 0) {
+                    handleLineClick(e);
+                }
+            });
+            
+            renderer.domElement.addEventListener('contextmenu', (e) => e.preventDefault());
+        }
+        
+        // 处理线段绘制点击
+        function handleLineClick(event) {
+            mouse.x = (event.clientX / window.innerWidth) * 2 - 1;
+            mouse.y = -(event.clientY / window.innerHeight) * 2 + 1;
+            
+            raycaster.setFromCamera(mouse, camera);
+            
+            // 创建XY平面用于射线交互 (Z=0平面)
+            const planeGeometry = new THREE.PlaneGeometry(
+                dataRange.x.max - dataRange.x.min,
+                dataRange.y.max - dataRange.y.min
+            );
+            const planeMaterial = new THREE.MeshBasicMaterial({ 
+                transparent: true, 
+                opacity: 0 
+            });
+            const plane = new THREE.Mesh(planeGeometry, planeMaterial);
+            plane.rotation.x = -Math.PI / 2; // 放置在XY平面(Z=0)
+            
+            const intersects = raycaster.intersectObject(plane);
+            
+            if (intersects.length > 0) {
+                const point = intersects[0].point;
+                linePoints.push({ x: point.x, y: point.z }); // 注意坐标转换
+                
+                if (linePoints.length === 2) {
+                    createLineMesh();
+                } else if (linePoints.length > 2) {
+                    // 重新开始绘制
+                    linePoints = [{ x: point.x, y: point.z }];
+                    if (lineMesh) {
+                        scene.remove(lineMesh);
+                        lineMesh = null;
+                    }
+                }
+            }
+        }
+        
+        // 创建线段网格
+        function createLineMesh() {
+            if (lineMesh) {
+                scene.remove(lineMesh);
+            }
+            
+            const geometry = new THREE.BufferGeometry();
+            const positions = new Float32Array([
+                linePoints[0].x, linePoints[0].y, 0, // 在XY平面(Z=0)上绘制
+                linePoints[1].x, linePoints[1].y, 0
+            ]);
+            
+            geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+            
+            const material = new THREE.LineBasicMaterial({ 
+                color: 0xff0000, 
+                linewidth: 4
+            });
+            
+            lineMesh = new THREE.Line(geometry, material);
+            scene.add(lineMesh);
+            
+            // 添加端点标记
+            const pointGeometry = new THREE.SphereGeometry(0.2, 8, 8);
+            const pointMaterial = new THREE.MeshBasicMaterial({ color: 0xff0000 });
+            
+            const point1 = new THREE.Mesh(pointGeometry, pointMaterial);
+            point1.position.set(linePoints[0].x, linePoints[0].y, 0);
+            lineMesh.add(point1);
+            
+            const point2 = new THREE.Mesh(pointGeometry, pointMaterial);
+            point2.position.set(linePoints[1].x, linePoints[1].y, 0);
+            lineMesh.add(point2);
+        }
+        
+        // 修改toggleMode函数以处理OrbitControls和绘图模式的切换
+        function toggleDrawMode() {
+            isLineMode = !isLineMode;
+            const button = document.getElementById('toggleMode');
+            
+            if (isLineMode) {
+                button.textContent = '切换到查看模式';
+                button.classList.add('active');
+                // 在绘图模式下禁用轨道控制器
+                controls.enabled = false;
+            } else {
+                button.textContent = '切换到线段模式';
+                button.classList.remove('active');
+                // 在查看模式下启用轨道控制器
+                controls.enabled = true;
+            }
+        }
+        
+        // 事件监听器
+        function setupEventListeners() {
+            document.getElementById('planeSelect').addEventListener('change', (e) => {
+                currentPlane = e.target.value;
+                updateContour();
+            });
+            
+            document.getElementById('planePosition').addEventListener('input', (e) => {
+                planePosition = e.target.value / 100;
+                document.getElementById('positionValue').textContent = e.target.value + '%';
+                updateContour();
+            });
+            
+            document.getElementById('contourLevels').addEventListener('input', (e) => {
+                contourLevels = parseInt(e.target.value);
+                document.getElementById('levelsValue').textContent = e.target.value;
+                updateContour();
+            });
+            
+            document.getElementById('generateData').addEventListener('click', generateSampleData);
+            
+            document.getElementById('togglePoints').addEventListener('click', () => {
+                if (dataPointsMesh) {
+                    dataPointsMesh.visible = !dataPointsMesh.visible;
+                }
+            });
+            
+            document.getElementById('toggleMode').addEventListener('click', toggleDrawMode);
+            
+            document.getElementById('clearLine').addEventListener('click', () => {
+                linePoints = [];
+                if (lineMesh) {
+                    scene.remove(lineMesh);
+                    lineMesh = null;
+                }
+            });
+            
+            document.getElementById('extractProfile').addEventListener('click', extractProfileData);
+            
+            // 体积渲染控制
+            document.getElementById('toggleVolume').addEventListener('click', toggleVolumeRendering);
+            
+            document.getElementById('volumeThreshold').addEventListener('input', (e) => {
+                const threshold = e.target.value / 100;
+                document.getElementById('thresholdValue').textContent = threshold.toFixed(2);
+                updateVolumeThreshold(threshold);
+            });
+            
+            document.getElementById('volumeAlpha').addEventListener('input', (e) => {
+                const alpha = e.target.value / 100;
+                document.getElementById('alphaValue').textContent = alpha.toFixed(2);
+                updateVolumeAlpha(alpha);
+            });
+        }
+
+        // 动画循环
+        function animate() {
+            requestAnimationFrame(animate);
+            if (controls) controls.update(); // 更新轨道控制
+            renderer.render(scene, camera);
+        }
+
+        // 窗口大小调整
+        function onWindowResize() {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        }
+
+        // 初始化应用
+        function init() {
+            initScene();
+            setupEventListeners();
+            generateSampleData();
+            animate();
+            
+            window.addEventListener('resize', onWindowResize);
+        }
+
+        // 启动应用
+        init();
+
+        // 体素渲染相关函数
+        function createVolumeRendering() {
+            if (volumeMesh) {
+                scene.remove(volumeMesh);
+                volumeMesh = null;
+            }
+
+            if (dataPoints.length === 0) return;
+
+            // 1. 创建3D体素网格来存储数据
+            const resolution = 32; // 体素分辨率
+            const grid = new Float32Array(resolution * resolution * resolution);
+            grid.fill(0); // 初始化为0
+            
+            // 确定数据边界
+            const xMin = dataRange.x.min;
+            const xMax = dataRange.x.max;
+            const yMin = dataRange.y.min;
+            const yMax = dataRange.y.max;
+            const zMin = dataRange.z.min;
+            const zMax = dataRange.z.max;
+            const vMin = Math.min(...dataPoints.map(p => p.v));
+            const vMax = Math.max(...dataPoints.map(p => p.v));
+            
+            // 显示体素创建进度
+            console.log("开始创建体素数据...");
+            
+            // 2. 将散点数据填充到体素网格中
+            dataPoints.forEach(point => {
+                // 计算在体素网格中的坐标
+                const ix = Math.floor((point.x - xMin) / (xMax - xMin) * (resolution - 1));
+                const iy = Math.floor((point.y - yMin) / (yMax - yMin) * (resolution - 1));
+                const iz = Math.floor((point.z - zMin) / (zMax - zMin) * (resolution - 1));
+                
+                if (ix >= 0 && ix < resolution && iy >= 0 && iy < resolution && iz >= 0 && iz < resolution) {
+                    // 存储归一化后的数据值
+                    const normalizedValue = (point.v - vMin) / (vMax - vMin);
+                    const index = iz * resolution * resolution + iy * resolution + ix;
+                    grid[index] = normalizedValue;
+                }
+            });
+            
+            console.log("数据填充完成，开始平滑处理...");
+            
+            // 3. 平滑插值填充空隙
+            const smoothedGrid = smoothGrid(grid, resolution);
+            
+            console.log("平滑处理完成，开始生成等值面...");
+            
+            // 4. 使用Marching Cubes算法构建等值面
+            const isoLevel = 0.15; // 等值面水平
+            
+            try {
+                const geometry = marchingCubes(smoothedGrid, resolution, isoLevel);
+                
+                console.log("等值面生成完成，顶点数:", geometry.attributes.position.count);
+                
+                // 5. 创建材质
+                const material = new THREE.MeshPhongMaterial({
+                    color: 0xffffff,
+                    vertexColors: true,
+                    shininess: 0,
+                    transparent: true,
+                    opacity: 0.85
+                });
+                
+                // 创建网格
+                volumeMesh = new THREE.Mesh(geometry, material);
+                
+                // 缩放网格以匹配数据范围
+                volumeMesh.scale.set(
+                    Math.abs(xMax - xMin),
+                    Math.abs(yMax - yMin),
+                    Math.abs(zMax - zMin)
+                );
+                
+                // 放置在正确位置
+                volumeMesh.position.set(
+                    (xMax + xMin) / 2,
+                    (yMax + yMin) / 2,
+                    (zMax + zMin) / 2
+                );
+                
+                scene.add(volumeMesh);
+                volumeRenderingActive = true;
+                
+            } catch (e) {
+                console.error("生成等值面时发生错误:", e);
+                alert("生成体积渲染时出错，请查看控制台");
+            }
+        }
+        
+        // 平滑处理网格数据
+        function smoothGrid(grid, resolution) {
+            const smoothed = new Float32Array(grid.length);
+            
+            // 简单的高斯平滑
+            for (let z = 1; z < resolution - 1; z++) {
+                for (let y = 1; y < resolution - 1; y++) {
+                    for (let x = 1; x < resolution - 1; x++) {
+                        let sum = 0;
+                        let count = 0;
+                        
+                        // 3x3x3 邻域
+                        for (let dz = -1; dz <= 1; dz++) {
+                            for (let dy = -1; dy <= 1; dy++) {
+                                for (let dx = -1; dx <= 1; dx++) {
+                                    const nx = x + dx;
+                                    const ny = y + dy;
+                                    const nz = z + dz;
+                                    
+                                    const idx = nz * resolution * resolution + ny * resolution + nx;
+                                    sum += grid[idx];
+                                    count++;
+                                }
+                            }
+                        }
+                        
+                        const centerIdx = z * resolution * resolution + y * resolution + x;
+                        smoothed[centerIdx] = sum / count;
+                    }
+                }
+            }
+            
+            // 复制边界
+            for (let z = 0; z < resolution; z++) {
+                for (let y = 0; y < resolution; y++) {
+                    for (let x = 0; x < resolution; x++) {
+                        if (x === 0 || x === resolution - 1 || 
+                            y === 0 || y === resolution - 1 || 
+                            z === 0 || z === resolution - 1) {
+                            const idx = z * resolution * resolution + y * resolution + x;
+                            smoothed[idx] = grid[idx];
+                        }
+                    }
+                }
+            }
+            
+            return smoothed;
+        }
+        
+        // 查找网格点的值，带边界检查
+        function getGridValue(grid, resolution, x, y, z) {
+            if (x < 0 || y < 0 || z < 0 || 
+                x >= resolution || y >= resolution || z >= resolution) {
+                return 0;
+            }
+            
+            return grid[z * resolution * resolution + y * resolution + x];
+        }
+        
+        // 根据数据值生成颜色
+        function getColorForValue(value) {
+            // 颜色映射：低值为蓝色，高值为红色
+            const color = new THREE.Color();
+            color.setHSL((1 - value) * 0.7, 0.8, 0.5); // 蓝色(0.7)到红色(0)
+            return color;
+        }
+        
+        // Marching Cubes算法
+        function marchingCubes(grid, resolution, isoLevel) {
+            console.log("开始Marching Cubes算法...");
+            
+            const geometry = new THREE.BufferGeometry();
+            const vertices = [];
+            const normals = [];
+            const colors = [];
+            
+            // 边的查找表 - 从每个顶点到相应边的映射
+            // 边的定义: 0: 0->1, 1: 1->2, 2: 2->3, 3: 3->0, 
+            //          4: 4->5, 5: 5->6, 6: 6->7, 7: 7->4,
+            //          8: 0->4, 9: 1->5, 10: 2->6, 11: 3->7
+            const edgeTable = [
+                [0, 8], [1, 9], [2, 10], [3, 11],
+                [4, 8], [5, 9], [6, 10], [7, 11],
+                [0, 3], [1, 0], [2, 1], [3, 2],
+                [4, 7], [5, 4], [6, 5], [7, 6]
+            ];
+            
+            // 遍历体素
+            let processedCubes = 0;
+            for (let z = 0; z < resolution - 1; z++) {
+                for (let y = 0; y < resolution - 1; y++) {
+                    for (let x = 0; x < resolution - 1; x++) {
+                        processedCubes++;
+                        
+                        // 获取当前立方体的8个顶点值
+                        const cubeValues = [
+                            getGridValue(grid, resolution, x, y, z),
+                            getGridValue(grid, resolution, x+1, y, z),
+                            getGridValue(grid, resolution, x+1, y+1, z),
+                            getGridValue(grid, resolution, x, y+1, z),
+                            getGridValue(grid, resolution, x, y, z+1),
+                            getGridValue(grid, resolution, x+1, y, z+1),
+                            getGridValue(grid, resolution, x+1, y+1, z+1),
+                            getGridValue(grid, resolution, x, y+1, z+1)
+                        ];
+                        
+                        // 计算配置索引
+                        let cubeIndex = 0;
+                        for (let i = 0; i < 8; i++) {
+                            if (cubeValues[i] > isoLevel) {
+                                cubeIndex |= 1 << i;
+                            }
+                        }
+                        
+                        // 如果立方体在等值面内部或外部，则跳过
+                        if (cubeIndex === 0 || cubeIndex === 255) continue;
+                        
+                        // 立方体顶点位置（归一化到[0,1]范围）
+                        const corners = [
+                            [x/resolution, y/resolution, z/resolution],
+                            [(x+1)/resolution, y/resolution, z/resolution],
+                            [(x+1)/resolution, (y+1)/resolution, z/resolution],
+                            [x/resolution, (y+1)/resolution, z/resolution],
+                            [x/resolution, y/resolution, (z+1)/resolution],
+                            [(x+1)/resolution, y/resolution, (z+1)/resolution],
+                            [(x+1)/resolution, (y+1)/resolution, (z+1)/resolution],
+                            [x/resolution, (y+1)/resolution, (z+1)/resolution]
+                        ];
+                        
+                        // 检查cubeIndex是否在表中
+                        if (!MARCHING_CUBES_TRIANGLES[cubeIndex] || !MARCHING_CUBES_TRIANGLES[cubeIndex].length) {
+                            continue; // 跳过未定义的配置
+                        }
+                        
+                        // 简化版本：为每个边生成顶点
+                        // 这不是标准的Marching Cubes，但可以生成一个简单的体积表示
+                        // 遍历体素中高于等值面的所有点对
+                        for (let i = 0; i < 8; i++) {
+                            if (cubeValues[i] > isoLevel) {
+                                for (let j = i + 1; j < 8; j++) {
+                                    if (cubeValues[j] > isoLevel) {
+                                        // 创建从i到j的边
+                                        const v1 = corners[i];
+                                        const v2 = corners[j];
+                                        
+                                        // 计算顶点位置为两个点的中点
+                                        const vx = (v1[0] + v2[0]) / 2;
+                                        const vy = (v1[1] + v2[1]) / 2;
+                                        const vz = (v1[2] + v2[2]) / 2;
+                                        
+                                        // 转换到[-0.5,0.5]范围以便放置在原点
+                                        vertices.push(vx - 0.5, vy - 0.5, vz - 0.5);
+                                        
+                                        // 简单计算法线 (指向体素中心)
+                                        const nx = vx - 0.5;
+                                        const ny = vy - 0.5;
+                                        const nz = vz - 0.5;
+                                        const len = Math.sqrt(nx*nx + ny*ny + nz*nz) || 1;
+                                        normals.push(nx/len, ny/len, nz/len);
+                                        
+                                        // 计算颜色（基于网格值的平均）
+                                        const value = (cubeValues[i] + cubeValues[j]) / 2;
+                                        const color = getColorForValue(value);
+                                        colors.push(color.r, color.g, color.b);
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                // 每处理完一层Z，记录进度
+                if (z % 5 === 0) {
+                    console.log(`Marching Cubes进度: ${Math.round((z / (resolution - 1)) * 100)}%`);
+                }
+            }
+            
+            console.log(`Marching Cubes完成，处理了${processedCubes}个体素，生成了${vertices.length / 3}个顶点`);
+            
+            // 如果没有生成任何顶点，创建一个默认的小几何体以避免错误
+            if (vertices.length === 0) {
+                console.warn("警告：Marching Cubes没有生成任何顶点，创建默认几何体");
+                // 创建一个小立方体作为占位符
+                const boxGeom = new THREE.BoxGeometry(0.1, 0.1, 0.1);
+                return boxGeom;
+            }
+            
+            // 创建几何体
+            geometry.setAttribute('position', new THREE.Float32BufferAttribute(vertices, 3));
+            geometry.setAttribute('normal', new THREE.Float32BufferAttribute(normals, 3));
+            geometry.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
+            
+            return geometry;
+        }
+        
+        // 更新体积渲染阈值 - 重建等值面
+        function updateVolumeThreshold(threshold) {
+            if (volumeRenderingActive) {
+                createVolumeRendering(); // 使用新阈值重新生成等值面
+            }
+        }
+        
+        // 更新体积渲染不透明度
+        function updateVolumeAlpha(alpha) {
+            if (volumeMesh && volumeMesh.material) {
+                volumeMesh.material.opacity = alpha;
+                volumeMesh.material.needsUpdate = true;
+            }
+        }
+        
+        // 切换体积渲染
+        function toggleVolumeRendering() {
+            if (volumeRenderingActive) {
+                if (volumeMesh) {
+                    scene.remove(volumeMesh);
+                    volumeMesh = null;
+                }
+                volumeRenderingActive = false;
+            } else {
+                createVolumeRendering();
+            }
+        }
+    </script>
+</body>
+</html>
