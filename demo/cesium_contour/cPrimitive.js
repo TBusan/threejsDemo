@@ -1,4 +1,4 @@
-import { contours as ztContours, contourDensity } from "./d3_zoutao.js";
+import { contours as ztContours } from "./d3_zoutao.js";
 class ContourPrimitive {
     constructor(options = {}) {
         // 默认选项
@@ -154,6 +154,7 @@ class ContourPrimitive {
         
         if (!contours || contours.length === 0) return;
         
+        debugger
         // 确保从低值到高值的顺序处理等值线
         const sortedContours = [...contours].sort((a, b) => a.value - b.value);
         
@@ -220,6 +221,7 @@ class ContourPrimitive {
                 holes.push(new Cesium.PolygonHierarchy(holePositions));
             }
         }
+        debugger
         
         // 创建多边形几何体
         const polygonHierarchy = new Cesium.PolygonHierarchy(positions, holes);
