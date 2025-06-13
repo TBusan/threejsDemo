@@ -6,6 +6,8 @@
 		<script src="https://d3js.org/d3.v7.min.js"></script>
 		<script src="../../Cesium107/Build/CesiumUnminified/Cesium.js"></script>
 		<link href="../../Cesium107/Build/CesiumUnminified/Widgets/widgets.css" rel="stylesheet">
+		<script src="./d3-contour.js"></script>
+		<script src="./d3_zoutao.js"></script>
 		<style>
 			body {
 				margin: 0;
@@ -96,7 +98,7 @@
 		<div id="cesiumContainer"></div>
 
 		<script type="module">
-			import { CustomContourPrimitive } from './customPrimitive.js';
+			import { ContourPrimitive } from './cPrimitive.js';
 			import { contourData } from './contourData4.js';
 
 			// 初始化Cesium
@@ -162,7 +164,7 @@
 			};
 
 			// 创建自定义的ContourPrimitive
-			const contourPrimitive = new CustomContourPrimitive(contourOptions);
+			const contourPrimitive = new ContourPrimitive(contourOptions);
 			
 			// 创建自定义的DataSource来管理primitive
 			const customDataSource = new Cesium.CustomDataSource('ContourDataSource');

@@ -66,7 +66,7 @@
 		</style>
 	</head>
 	<body>
-		<div id="info">D3等值线数据 + Cesium Primitive渲染</div>
+		<div id="info">D3等值线数据 + Cesium Custom Primitive渲染</div>
 		<div id="controls">
 			<div class="control-group">
 				<label><input type="checkbox" id="showContourLines" checked />显示等值线轮廓</label>
@@ -98,7 +98,7 @@
 		<div id="cesiumContainer"></div>
 
 		<script type="module">
-			import { ContourPrimitive } from './cPrimitive.js';
+			import { CustomContourPrimitive } from './customPrimitive.js';
 			import { contourData } from './contourData4.js';
 
 			// 初始化Cesium
@@ -164,18 +164,14 @@
 			};
 
 			// 创建自定义的ContourPrimitive
-			const contourPrimitive = new ContourPrimitive(contourOptions);
+			const contourPrimitive = new CustomContourPrimitive(contourOptions);
 			
 			// 创建自定义的DataSource来管理primitive
 			const customDataSource = new Cesium.CustomDataSource('ContourDataSource');
 			viewer.dataSources.add(customDataSource);
 
-			// 添加更新回调
-			viewer.scene.primitives.add({
-				update: function(frameState) {
-					contourPrimitive.update(frameState);
-				}
-			});
+			// 直接添加自定义primitive到场景中
+			viewer.scene.primitives.add(contourPrimitive);
 
 			// 初始化相机位置
 			viewer.camera.flyTo({
