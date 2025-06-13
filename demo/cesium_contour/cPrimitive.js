@@ -1,3 +1,4 @@
+import { contours as ztContours, contourDensity } from "./d3_zoutao.js";
 class ContourPrimitive {
     constructor(options = {}) {
         // 默认选项
@@ -157,6 +158,7 @@ class ContourPrimitive {
             // 获取当前等值线的颜色
             const colorStr = this.getTerrainColor(contour.value);
             const color = this.parseColor(colorStr);
+            debugger
             const isSpecialContour = this.options.specificThresholds.includes(contour.value);
             
             // 为每个多边形创建几何实例
@@ -284,7 +286,7 @@ class ContourPrimitive {
         if (!gridData) return;
         
         // 导入d3-contour库
-        const contourGenerator = window.ztContours()
+        const contourGenerator = ztContours()
             .size([gridSizeX, gridSizeY])
             .thresholds(this.options.specificThresholds)
             .x(dataX)
