@@ -106,7 +106,7 @@
                 <input type="checkbox" id="smoothToggle" checked>
                 启用平滑
             </div>
-
+            
             <div class="control-group">
                 <button id="loadSample1">样例1: 多峰面</button>
                 <button id="loadSample2">样例2: 波浪面</button>
@@ -131,7 +131,7 @@
 	</script>
     <script type="module">
         import * as THREE from "three";
-        import { OrbitControls } from "three/addons/controls/OrbitControls.js";
+		import { OrbitControls } from "three/addons/controls/OrbitControls.js";
         
         // 全局变量
         let scene, camera, renderer, controls;
@@ -140,7 +140,7 @@
         let gridSize = 50;
         let heightScale = 15;
         let smoothEnabled = true;
-        
+
         // 初始化场景
         function initScene() {
             scene = new THREE.Scene();
@@ -156,7 +156,7 @@
             });
             renderer.setSize(window.innerWidth, window.innerHeight);
             document.getElementById('canvas-container').appendChild(renderer.domElement);
-            
+
             // 使用OrbitControls
             controls = new OrbitControls(camera, renderer.domElement);
             controls.enableDamping = true;
