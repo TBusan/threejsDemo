@@ -121,7 +121,12 @@ class ContourPrimitive {
     // 将RGBA字符串转换为Cesium.Color
     parseColor(colorStr) {
         const rgba = colorStr.match(/\d+/g).map(Number);
-        return new Cesium.Color(rgba[0] / 255, rgba[1] / 255, rgba[2] / 255, rgba[3] / 255);
+        // 确保alpha值正确，如果不存在或者解析错误，使用默认值1.0
+        const r = rgba[0] / 255;
+        const g = rgba[1] / 255;
+        const b = rgba[2] / 255;
+        const a = rgba.length >= 4 ? rgba[3] / 255 : 1.0;
+        return new Cesium.Color(r, g, b, a);
     }
     
     // 将数据坐标转换为Cesium地理坐标
@@ -219,6 +224,10 @@ class ContourPrimitive {
         // 创建多边形几何体
         const polygonHierarchy = new Cesium.PolygonHierarchy(positions, holes);
         
+        // 确保颜色的alpha值适中，使填充可见
+        const fillColor = color.clone();
+        fillColor.alpha = Math.max(0.6, fillColor.alpha); // 确保至少有0.6的不透明度
+        
         const polygonInstance = new Cesium.GeometryInstance({
             geometry: new Cesium.PolygonGeometry({
                 polygonHierarchy: polygonHierarchy,
@@ -226,7 +235,7 @@ class ContourPrimitive {
                 vertexFormat: Cesium.VertexFormat.POSITION_AND_COLOR
             }),
             attributes: {
-                color: Cesium.ColorGeometryInstanceAttribute.fromColor(color),
+                color: Cesium.ColorGeometryInstanceAttribute.fromColor(fillColor),
                 distanceDisplayCondition: new Cesium.DistanceDisplayConditionGeometryInstanceAttribute(0, 1.0e6)
             },
             id: `contour-${value}-${zIndex}`
@@ -313,7 +322,11 @@ class ContourPrimitive {
                     geometryInstances: this._contourInstances,
                     appearance: new Cesium.PerInstanceColorAppearance({
                         flat: true,
-                        translucent: true
+                        translucent: true,
+                        renderState: {
+                            depthMask: false,
+                            blending: Cesium.BlendingState.ALPHA_BLEND
+                        }
                     }),
                     asynchronous: false
                 });

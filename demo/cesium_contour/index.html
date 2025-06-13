@@ -51,6 +51,18 @@
 			.control-group input[type="range"] {
 				width: 100%;
 			}
+			#fpsContainer {
+				position: absolute;
+				bottom: 10px;
+				right: 10px;
+				background: rgba(42, 42, 42, 0.8);
+				padding: 5px 10px;
+				border-radius: 5px;
+				color: white;
+				font-family: monospace;
+				font-size: 14px;
+				z-index: 999;
+			}
 		</style>
 	</head>
 	<body>
@@ -82,6 +94,7 @@
 				<input type="range" id="scaleSlider" min="0.00001" max="0.01" value="0.001" step="0.00001">
 			</div>
 		</div>
+		<div id="fpsContainer">FPS: <span id="fps">--</span></div>
 		<div id="cesiumContainer"></div>
 
 		<script type="module">
@@ -89,7 +102,7 @@
 			import { contourData } from './contourData4.js';
 
 			// 初始化Cesium
-		  Cesium.Ion.defaultAccessToken = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJqdGkiOiI0NTEyMTQ4ZS00NTdmLTRhYTYtYTY5NS1mYWIwNDY2OGNhNDYiLCJpZCI6MTMxODY0LCJpYXQiOjE2ODA1MDY0Nzd9.9TwdaxPqnGYRop2hp8lAKNgLlty3YFd_tAcijUPmB4A';
+			Cesium.Ion.defaultAccessToken = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJqdGkiOiI0NTEyMTQ4ZS00NTdmLTRhYTYtYTY5NS1mYWIwNDY2OGNhNDYiLCJpZCI6MTMxODY0LCJpYXQiOjE2ODA1MDY0Nzd9.9TwdaxPqnGYRop2hp8lAKNgLlty3YFd_tAcijUPmB4A';
 			
 			const viewer = new Cesium.Viewer('cesiumContainer', {
 				// terrainProvider: Cesium.createWorldTerrain(),
@@ -103,9 +116,38 @@
 				selectionIndicator: false,
 				timeline: false,
 				navigationHelpButton: false,
-				scene3DOnly: true,
-				shouldAnimate: true
+				// scene3DOnly: true,
+				shouldAnimate: true,
+				sceneMode: Cesium.SceneMode.SCENE2D,
 			});
+
+			// 添加帧率统计
+			viewer.scene.debugShowFramesPerSecond = true;
+			
+			// 创建自定义FPS计数器
+			const fpsElement = document.getElementById('fps');
+			let frameCount = 0;
+			let lastTime = performance.now();
+			
+			// FPS更新函数
+			function updateFPS() {
+				frameCount++;
+				const now = performance.now();
+				const elapsed = now - lastTime;
+				
+				// 每秒更新一次
+				if (elapsed >= 1000) {
+					const fps = Math.round((frameCount * 1000) / elapsed);
+					fpsElement.textContent = fps;
+					frameCount = 0;
+					lastTime = now;
+				}
+				
+				requestAnimationFrame(updateFPS);
+			}
+			
+			// 启动FPS计数
+			updateFPS();
 
 			// 取消双击事件追踪
 			viewer.cesiumWidget.screenSpaceEventHandler.removeInputAction(Cesium.ScreenSpaceEventType.LEFT_DOUBLE_CLICK);
