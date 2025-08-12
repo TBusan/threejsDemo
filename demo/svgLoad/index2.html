@@ -75,7 +75,7 @@
 
 				//
 
-				renderer = new THREE.WebGLRenderer( { antialias: true, stencil: true } );
+				renderer = new THREE.WebGLRenderer( { antialias: true } );
 				renderer.setPixelRatio( window.devicePixelRatio );
 				renderer.setSize( window.innerWidth, window.innerHeight );
 				container.appendChild( renderer.domElement );
@@ -91,7 +91,7 @@
 				window.addEventListener( 'resize', onWindowResize );
 
 				guiData = {
-					currentURL: './kk.svg',
+					currentURL: './nn.svg',
 					drawFillShapes: true,
 					drawStrokes: true,
 					fillShapesWireframe: false,
@@ -112,8 +112,8 @@
 
 				gui.add( guiData, 'currentURL', {
 
-					'nn': './nn.svg',
-					'mm': './mm.svg',
+					'Tiger': './tiger.svg',
+					'Joins and caps': 'models/svg/lineJoinsAndCaps.svg',
 				} ).name( 'SVG File' ).onChange( update );
 
 				gui.add( guiData, 'drawStrokes' ).name( 'Draw strokes' ).onChange( update );
