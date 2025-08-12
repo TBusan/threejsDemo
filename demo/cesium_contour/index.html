@@ -4,8 +4,8 @@
 		<meta charset="utf-8" />
 		<title>Cesium 渲染D3.js等值线图</title>
 		<script src="https://d3js.org/d3.v7.min.js"></script>
-		<script src="../../Cesium107/Build/CesiumUnminified/Cesium.js"></script>
-		<link href="../../Cesium107/Build/CesiumUnminified/Widgets/widgets.css" rel="stylesheet">
+		<script src="../../Cesium120/Build/CesiumUnminified/Cesium.js"></script>
+		<link href="../../Cesium120/Build/CesiumUnminified/Widgets/widgets.css" rel="stylesheet">
 		<script src="./d3-contour.js"></script>
 		<script src="./d3_zoutao.js"></script>
 		<style>
@@ -158,7 +158,7 @@
 				showContourLines: true,
 				showContourFill: true,
 				smooth: true,
-				height: 0,
+				height: 100,
 				referencePoint: [116.4, 39.9], // 北京附近
 				scale: 0.001 // 缩放因子
 			};
@@ -167,8 +167,8 @@
 			const contourPrimitive = new CustomContourPrimitive(contourOptions);
 			
 			// 创建自定义的DataSource来管理primitive
-			const customDataSource = new Cesium.CustomDataSource('ContourDataSource');
-			viewer.dataSources.add(customDataSource);
+			// const customDataSource = new Cesium.CustomDataSource('ContourDataSource');
+			// viewer.dataSources.add(customDataSource);
 
 			// 直接添加自定义primitive到场景中
 			viewer.scene.primitives.add(contourPrimitive);

@@ -1,7 +1,7 @@
 import { contours as ztContours } from "./d3_zoutao.js";
 
 /**
- * A custom Cesium primitive for rendering contour lines and fills using D3.js and custom shaders
+ * A custom Cesium primitive for rendering contour lines and fills using D3.js
  */
 class CustomContourPrimitive {
     constructor(options = {}) {
@@ -20,8 +20,6 @@ class CustomContourPrimitive {
         
         this._fillCommands = [];
         this._lineCommands = [];
-        this._createFillCommand = this._createFillCommand.bind(this);
-        this._createLineCommand = this._createLineCommand.bind(this);
         this._colorMap = this._buildColorMap();
         
         this.show = true;
@@ -148,306 +146,6 @@ class CustomContourPrimitive {
         return Cesium.Cartesian3.fromDegrees(lon, lat, height);
     }
     
-    // Create vertex array for contour polygons
-    _createFillVertexArray(context, polygon, color, value) {
-        // Handle outer contour
-        const outerRing = polygon[0];
-        const positions = [];
-        
-        // Convert contour points to Cesium coordinates
-        for (const point of outerRing) {
-            const [x, y] = point;
-            if (x === undefined || y === undefined || isNaN(x) || isNaN(y)) {
-                continue;
-            }
-            const cartesian = this.dataToCartesian(x, y);
-            positions.push(cartesian.x, cartesian.y, cartesian.z);
-        }
-        
-        if (positions.length < 9) return null; // Need at least 3 points to form a polygon
-        
-        // Triangulate the polygon (simple earcut algorithm)
-        const indices = [];
-        for (let i = 1; i < positions.length / 3 - 1; i++) {
-            indices.push(0, i, i + 1);
-        }
-        
-        // Create a vertex buffer for positions
-        const positionBuffer = Cesium.Buffer.createVertexBuffer({
-            context: context,
-            typedArray: new Float32Array(positions),
-            usage: Cesium.BufferUsage.STATIC_DRAW
-        });
-        
-        // Create color buffer (same color for all vertices)
-        const colorArray = new Float32Array(positions.length / 3 * 4);
-        for (let i = 0; i < positions.length / 3; i++) {
-            colorArray[i * 4] = color[0];
-            colorArray[i * 4 + 1] = color[1];
-            colorArray[i * 4 + 2] = color[2];
-            colorArray[i * 4 + 3] = color[3];
-        }
-        
-        const colorBuffer = Cesium.Buffer.createVertexBuffer({
-            context: context,
-            typedArray: colorArray,
-            usage: Cesium.BufferUsage.STATIC_DRAW
-        });
-        
-        // Create index buffer
-        const indexBuffer = Cesium.Buffer.createIndexBuffer({
-            context: context,
-            typedArray: new Uint16Array(indices),
-            usage: Cesium.BufferUsage.STATIC_DRAW,
-            indexDatatype: Cesium.IndexDatatype.UNSIGNED_SHORT
-        });
-        
-        // Define vertex attributes
-        const attributes = [
-            {
-                index: 0,  // position attribute
-                vertexBuffer: positionBuffer,
-                componentsPerAttribute: 3,
-                componentDatatype: Cesium.ComponentDatatype.FLOAT
-            },
-            {
-                index: 1,  // color attribute
-                vertexBuffer: colorBuffer,
-                componentsPerAttribute: 4,
-                componentDatatype: Cesium.ComponentDatatype.FLOAT
-            }
-        ];
-        
-        // Create and return the vertex array
-        return new Cesium.VertexArray({
-            context: context,
-            attributes: attributes,
-            indexBuffer: indexBuffer
-        });
-    }
-    
-    // Create vertex array for contour lines
-    _createLineVertexArray(context, ring, isSpecial) {
-        const positions = [];
-        
-        // Convert contour points to Cesium coordinates
-        for (const point of ring) {
-            const [x, y] = point;
-            if (x === undefined || y === undefined || isNaN(x) || isNaN(y)) {
-                continue;
-            }
-            const cartesian = this.dataToCartesian(x, y);
-            positions.push(cartesian.x, cartesian.y, cartesian.z);
-        }
-        
-        // Ensure we have enough points and close the loop
-        if (positions.length < 6) return null; // Need at least 2 points for a line
-        
-        // Create a vertex buffer for positions
-        const positionBuffer = Cesium.Buffer.createVertexBuffer({
-            context: context,
-            typedArray: new Float32Array(positions),
-            usage: Cesium.BufferUsage.STATIC_DRAW
-        });
-        
-        // Create color buffer
-        const color = isSpecial ? [1.0, 1.0, 1.0, 1.0] : [0.5, 0.5, 0.5, 0.8];
-        const colorArray = new Float32Array(positions.length / 3 * 4);
-        for (let i = 0; i < positions.length / 3; i++) {
-            colorArray[i * 4] = color[0];
-            colorArray[i * 4 + 1] = color[1];
-            colorArray[i * 4 + 2] = color[2];
-            colorArray[i * 4 + 3] = color[3];
-        }
-        
-        const colorBuffer = Cesium.Buffer.createVertexBuffer({
-            context: context,
-            typedArray: colorArray,
-            usage: Cesium.BufferUsage.STATIC_DRAW
-        });
-        
-        // Create indices for line strip
-        const indices = [];
-        for (let i = 0; i < positions.length / 3; i++) {
-            indices.push(i);
-        }
-        // Close the loop
-        indices.push(0);
-        
-        const indexBuffer = Cesium.Buffer.createIndexBuffer({
-            context: context,
-            typedArray: new Uint16Array(indices),
-            usage: Cesium.BufferUsage.STATIC_DRAW,
-            indexDatatype: Cesium.IndexDatatype.UNSIGNED_SHORT
-        });
-        
-        // Define vertex attributes
-        const attributes = [
-            {
-                index: 0,  // position attribute
-                vertexBuffer: positionBuffer,
-                componentsPerAttribute: 3,
-                componentDatatype: Cesium.ComponentDatatype.FLOAT
-            },
-            {
-                index: 1,  // color attribute
-                vertexBuffer: colorBuffer,
-                componentsPerAttribute: 4,
-                componentDatatype: Cesium.ComponentDatatype.FLOAT
-            }
-        ];
-        
-        // Create and return the vertex array
-        return new Cesium.VertexArray({
-            context: context,
-            attributes: attributes,
-            indexBuffer: indexBuffer
-        });
-    }
-    
-    // Define shader source for filled contours
-    _getFillVertexShader() {
-        return `
-        attribute vec3 position;
-        attribute vec4 color;
-        
-        varying vec4 v_color;
-        
-        void main() {
-            v_color = color;
-            gl_Position = czm_modelViewProjection * vec4(position, 1.0);
-        }
-        `;
-    }
-    
-    _getFillFragmentShader() {
-        return `
-        varying vec4 v_color;
-        
-        void main() {
-            gl_FragColor = v_color;
-        }
-        `;
-    }
-    
-    // Define shader source for contour lines
-    _getLineVertexShader() {
-        return `
-        attribute vec3 position;
-        attribute vec4 color;
-        
-        varying vec4 v_color;
-        
-        void main() {
-            v_color = color;
-            gl_Position = czm_modelViewProjection * vec4(position, 1.0);
-        }
-        `;
-    }
-    
-    _getLineFragmentShader() {
-        return `
-        varying vec4 v_color;
-        
-        void main() {
-            gl_FragColor = v_color;
-        }
-        `;
-    }
-    
-    // Create command for filled contours
-    _createFillCommand(context, vertexArray, value, zIndex) {
-        // Define attribute locations
-        const attributeLocations = {
-            position: 0,
-            color: 1
-        };
-        
-        // Create shader sources
-        const vertexShaderSource = new Cesium.ShaderSource({
-            sources: [this._getFillVertexShader()]
-        });
-        
-        const fragmentShaderSource = new Cesium.ShaderSource({
-            sources: [this._getFillFragmentShader()]
-        });
-        
-        // Create shader program
-        const shaderProgram = Cesium.ShaderProgram.fromCache({
-            context: context,
-            vertexShaderSource: vertexShaderSource,
-            fragmentShaderSource: fragmentShaderSource,
-            attributeLocations: attributeLocations
-        });
-        
-        // Define render state (with alpha blending)
-        const renderState = Cesium.RenderState.fromCache({
-            depthTest: {
-                enabled: true
-            },
-            blending: Cesium.BlendingState.ALPHA_BLEND,
-            depthMask: false
-        });
-        
-        // Create and return the draw command
-        return new Cesium.DrawCommand({
-            vertexArray: vertexArray,
-            primitiveType: Cesium.PrimitiveType.TRIANGLES,
-            renderState: renderState,
-            shaderProgram: shaderProgram,
-            pass: Cesium.Pass.TRANSLUCENT,
-            owner: this,
-            uniformMap: {}
-        });
-    }
-    
-    // Create command for contour lines
-    _createLineCommand(context, vertexArray, isSpecial, value, zIndex) {
-        // Define attribute locations
-        const attributeLocations = {
-            position: 0,
-            color: 1
-        };
-        
-        // Create shader sources
-        const vertexShaderSource = new Cesium.ShaderSource({
-            sources: [this._getLineVertexShader()]
-        });
-        
-        const fragmentShaderSource = new Cesium.ShaderSource({
-            sources: [this._getLineFragmentShader()]
-        });
-        
-        // Create shader program
-        const shaderProgram = Cesium.ShaderProgram.fromCache({
-            context: context,
-            vertexShaderSource: vertexShaderSource,
-            fragmentShaderSource: fragmentShaderSource,
-            attributeLocations: attributeLocations
-        });
-        
-        // Define render state
-        const renderState = Cesium.RenderState.fromCache({
-            depthTest: {
-                enabled: true
-            },
-            blending: Cesium.BlendingState.ALPHA_BLEND,
-            lineWidth: 1.0, // isSpecial ? 3.0 : 1.0,
-            depthMask: false
-        });
-        
-        // Create and return the draw command
-        return new Cesium.DrawCommand({
-            vertexArray: vertexArray,
-            primitiveType: Cesium.PrimitiveType.LINE_STRIP,
-            renderState: renderState,
-            shaderProgram: shaderProgram,
-            pass: Cesium.Pass.TRANSLUCENT,
-            owner: this,
-            uniformMap: {}
-        });
-    }
-    
     // Generate contours and create necessary commands
     _generateContours(context) {
         if (!this.options.contourData) return;
@@ -466,15 +164,14 @@ class CustomContourPrimitive {
             
         // Calculate contours - use preprocessed data
         const contours = contourGenerator(this.handleNullInGrid(gridData));
+        debugger
+        // Create geometry instances for each contour
+        const fillGeometryInstances = [];
+        const lineGeometryInstances = [];
         
         // Ensure contours are processed from low to high values for proper rendering
         const sortedContours = [...contours].sort((a, b) => a.value - b.value);
         
-        // Reset commands
-        this._fillCommands = [];
-        this._lineCommands = [];
-        
-        // Create commands for contours
         for (let i = 0; i < sortedContours.length; i++) {
             const contour = sortedContours[i];
             
@@ -491,24 +188,116 @@ class CustomContourPrimitive {
                 
                 // Create filled polygon
                 if (this.options.showContourFill) {
-                    const vertexArray = this._createFillVertexArray(context, polygon, color, contour.value);
-                    if (vertexArray) {
-                        const command = this._createFillCommand(context, vertexArray, contour.value, i);
-                        this._fillCommands.push(command);
+                    const positions = [];
+                    
+                    // Convert contour points to Cesium coordinates
+                    for (const point of polygon[0]) {
+                        const [x, y] = point;
+                        if (x === undefined || y === undefined || isNaN(x) || isNaN(y)) {
+                            continue;
+                        }
+                        positions.push(this.dataToCartesian(x, y));
                     }
+                    
+                    if (positions.length < 3) continue; // Need at least 3 points for a polygon
+                    
+                    // Create polygon geometry instance
+                    const cesiumColor = new Cesium.Color(color[0], color[1], color[2], color[3]);
+                    const instance = new Cesium.GeometryInstance({
+                        geometry: new Cesium.PolygonGeometry({
+                            polygonHierarchy: new Cesium.PolygonHierarchy(positions),
+                            perPositionHeight: true
+                        }),
+                        attributes: {
+                            color: Cesium.ColorGeometryInstanceAttribute.fromColor(cesiumColor)
+                        },
+                        id: `contour-fill-${contour.value}-${i}`
+                    });
+                    
+                    fillGeometryInstances.push(instance);
                 }
                 
                 // Create contour lines
                 if (this.options.showContourLines) {
                     for (const ring of polygon) {
-                        const vertexArray = this._createLineVertexArray(context, ring, isSpecialContour);
-                        if (vertexArray) {
-                            const command = this._createLineCommand(context, vertexArray, isSpecialContour, contour.value, i);
-                            this._lineCommands.push(command);
+                        const positions = [];
+                        
+                        // Convert contour points to Cesium coordinates
+                        for (const point of ring) {
+                            const [x, y] = point;
+                            if (x === undefined || y === undefined || isNaN(x) || isNaN(y)) {
+                                continue;
+                            }
+                            positions.push(this.dataToCartesian(x, y));
                         }
+                        
+                        if (positions.length < 2) continue; // Need at least 2 points for a line
+                        
+                        // Close the loop
+                        positions.push(positions[0]);
+                        
+                        // Create line geometry instance
+                        const lineColor = isSpecialContour ? 
+                            Cesium.Color.WHITE : 
+                            Cesium.Color.fromAlpha(Cesium.Color.GRAY, 0.8);
+                            
+                        const instance = new Cesium.GeometryInstance({
+                            geometry: new Cesium.PolylineGeometry({
+                                positions: positions,
+                                width: isSpecialContour ? 3.0 : 1.0,
+                                vertexFormat: Cesium.PolylineColorAppearance.VERTEX_FORMAT
+                            }),
+                            attributes: {
+                                color: Cesium.ColorGeometryInstanceAttribute.fromColor(lineColor)
+                            },
+                            id: `contour-line-${contour.value}-${i}`
+                        });
+                        
+                        lineGeometryInstances.push(instance);
                     }
                 }
             }
+        }
+        
+        // Create fill primitive
+        if (fillGeometryInstances.length > 0) {
+            const fillPrimitive = new Cesium.Primitive({
+                geometryInstances: fillGeometryInstances,
+                appearance: new Cesium.PerInstanceColorAppearance({
+                    flat: true,
+                    translucent: true,
+                    renderState: {
+                        depthMask: false,
+                        blending: Cesium.BlendingState.ALPHA_BLEND
+                    }
+                }),
+                asynchronous: false
+            });
+            
+            this._fillCommands.push({
+                primitive: fillPrimitive,
+                update: function(frameState) {
+                    fillPrimitive.update(frameState);
+                }
+            });
+        }
+        
+        // Create line primitive
+        if (lineGeometryInstances.length > 0) {
+            const linePrimitive = new Cesium.Primitive({
+                geometryInstances: lineGeometryInstances,
+                appearance: new Cesium.PolylineColorAppearance({
+                    translucent: true
+                }),
+                asynchronous: false
+            });
+            
+            this._lineCommands.push({
+                primitive: linePrimitive,
+                update: function(frameState) {
+                    linePrimitive.update(frameState);
+                }
+            });
         }
         
         this._generated = true;
@@ -525,28 +314,29 @@ class CustomContourPrimitive {
             this._generateContours(context);
         }
         
-        // Add fill commands to the command list
+        // Update all primitives
         for (const command of this._fillCommands) {
-            frameState.commandList.push(command);
+            command.update(frameState);
         }
         
-        // Add line commands to the command list
         for (const command of this._lineCommands) {
-            frameState.commandList.push(command);
+            command.update(frameState);
         }
     }
     
     // Reset primitive to regenerate with new settings
     destroy() {
-        // Clean up shader programs
+        // Clean up primitives
         for (const command of this._fillCommands) {
-            command.shaderProgram = command.shaderProgram && command.shaderProgram.destroy();
-            command.vertexArray = command.vertexArray && command.vertexArray.destroy();
+            if (command.primitive && !command.primitive.isDestroyed()) {
+                command.primitive.destroy();
+            }
         }
         
         for (const command of this._lineCommands) {
-            command.shaderProgram = command.shaderProgram && command.shaderProgram.destroy();
-            command.vertexArray = command.vertexArray && command.vertexArray.destroy();
+            if (command.primitive && !command.primitive.isDestroyed()) {
+                command.primitive.destroy();
+            }
         }
         
         this._fillCommands = [];

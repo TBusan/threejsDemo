@@ -1,0 +1,144 @@
+<!DOCTYPE html>
+<html>
+	<head>
+		<meta charset="utf-8" />
+		<title>Three.js 渲染D3.js等值线图</title>
+		<script src="https://d3js.org/d3.v7.min.js"></script>
+		<style>
+			body {
+				margin: 0;
+				overflow: hidden;
+			}
+			canvas {
+				display: block;
+			}
+			#info {
+				position: absolute;
+				top: 10px;
+				width: 100%;
+				text-align: center;
+				color: white;
+				font-family: Arial, sans-serif;
+			}
+			#controls {
+				position: absolute;
+				top: 40px;
+				left: 10px;
+				background: rgba(0, 0, 0, 0.5);
+				padding: 10px;
+				border-radius: 5px;
+				color: white;
+				font-family: Arial, sans-serif;
+			}
+			#colorScale {
+				margin-top: 10px;
+				width: 300px;
+				height: 30px;
+				position: relative;
+			}
+		</style>
+	</head>
+	<body>
+		<div id="info">D3等值线数据 + Three.js渲染</div>
+		<div id="container"></div>
+
+		<script type="importmap">
+			{
+				"imports": {
+					"three": "../../build/three.module.js",
+					"three/addons/": "../../examples/jsm/"
+				}
+			}
+		</script>
+
+		<script type="module">
+			// 导入必要的库
+			import * as THREE from "three";
+			import { OrbitControls } from "three/addons/controls/OrbitControls.js";
+			import Stats from "three/addons/libs/stats.module.js";
+			import { ContourGenerator } from "./index.js";
+
+			// 1. Scene Setup
+			const scene = new THREE.Scene();
+			scene.background = new THREE.Color(0xf0f0f0);
+
+			const camera = new THREE.PerspectiveCamera(
+				75,
+				window.innerWidth / window.innerHeight,
+				0.1,
+				1000
+			);
+			camera.position.set(5, 5, 10);
+			camera.lookAt(5, 2.5, 0);
+
+			const renderer = new THREE.WebGLRenderer({ antialias: true });
+			renderer.setSize(window.innerWidth, window.innerHeight);
+			document.body.appendChild(renderer.domElement);
+
+			// 2. Sample Data (similar to the plotly example)
+			const x = Array.from({ length: 10 }, (_, i) => i);
+			const y = Array.from({ length: 5 }, (_, i) => i);
+			const z = [
+				[10, 30, 50, 70, 90, 110, 130, 150, 170, 190],
+				[20, 40, 60, 80, 100, 120, 140, 160, 180, 200],
+				[30, 50, 70, 90, 110, 130, 150, 170, 190, 210],
+				[40, 60, 80, 100, 120, 140, 160, 180, 200, 220],
+				[50, 70, 90, 110, 130, 150, 170, 190, 210, 230],
+			];
+
+			// 3. Contour Configuration
+			const contourOptions = {
+				x: x,
+				y: y,
+				z: z,
+				contours: {
+					start: 0,
+					end: 200,
+					size: 25,
+					// coloring: 'lines' // or 'fill'
+					coloring: "fill",
+				},
+				colorscale: [
+					[0, "rgb(0,0,255)"],
+					[50, "rgb(0,255,0)"],
+					[100, "rgb(255,255,0)"],
+					[150, "rgb(255,0,0)"],
+					[200, "rgb(128,0,128)"],
+				],
+				useRealValue: true,
+			};
+
+			// 4. Generate and Add to Scene
+			try {
+				const contourGenerator = new ContourGenerator(contourOptions);
+				const contourObjects = contourGenerator.createThreeObjects();
+				scene.add(contourObjects);
+			} catch (e) {
+				console.error("Could not generate contours:", e);
+			}
+
+			// Add a grid helper for context
+			// const gridHelper = new THREE.GridHelper(10, 10);
+			// gridHelper.rotation.x = Math.PI / 2; // Align with XY plane
+			// scene.add(gridHelper);
+
+			// 5. Render Loop
+			function animate() {
+				requestAnimationFrame(animate);
+				renderer.render(scene, camera);
+			}
+			animate();
+
+			// Handle window resize
+			window.addEventListener(
+				"resize",
+				() => {
+					camera.aspect = window.innerWidth / window.innerHeight;
+					camera.updateProjectionMatrix();
+					renderer.setSize(window.innerWidth, window.innerHeight);
+				},
+				false
+			);
+		</script>
+	</body>
+</html>
