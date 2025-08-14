@@ -95,7 +95,8 @@
 					drawFillShapes: true,
 					drawStrokes: true,
 					fillShapesWireframe: false,
-					strokesWireframe: false
+					strokesWireframe: false,
+					showClipPaths: true
 				};
 
 				loadSVG( guiData.currentURL );
@@ -112,6 +113,7 @@
 
 				gui.add( guiData, 'currentURL', {
 
+					'nn': './nn.svg',
 					'Tiger': './tiger.svg',
 					'Joins and caps': 'models/svg/lineJoinsAndCaps.svg',
 				} ).name( 'SVG File' ).onChange( update );
@@ -123,6 +125,8 @@
 				gui.add( guiData, 'strokesWireframe' ).name( 'Wireframe strokes' ).onChange( update );
 
 				gui.add( guiData, 'fillShapesWireframe' ).name( 'Wireframe fill shapes' ).onChange( update );
+
+				gui.add( guiData, 'showClipPaths' ).name( 'Show ClipPaths (Red)' ).onChange( update );
 
 				function update() {
 
@@ -149,6 +153,139 @@
 				helper.rotation.x = Math.PI / 2;
 				scene.add( helper );
 
+				// Add coordinate axes at origin (0,0,0)
+				const axesHelper = new THREE.AxesHelper( 50 );
+				scene.add( axesHelper );
+
+				// Add custom coordinate axes with labels
+				function createCoordinateAxes() {
+					const axesGroup = new THREE.Group();
+
+					// Helper function to create text texture
+					function createTextTexture(text, color = '#ffffff') {
+						const canvas = document.createElement('canvas');
+						const context = canvas.getContext('2d');
+						
+						canvas.width = 64;
+						canvas.height = 64;
+						
+						context.fillStyle = color;
+						context.font = 'Bold 32px Arial';
+						context.textAlign = 'center';
+						context.textBaseline = 'middle';
+						context.fillText(text, canvas.width / 2, canvas.height / 2);
+						
+						const texture = new THREE.CanvasTexture(canvas);
+						texture.needsUpdate = true;
+						return texture;
+					}
+
+					// X-axis (Red)
+					const xGeometry = new THREE.BufferGeometry().setFromPoints([
+						new THREE.Vector3(0, 0, 0),
+						new THREE.Vector3(100, 0, 0)
+					]);
+					const xMaterial = new THREE.LineBasicMaterial({ color: 0xff0000, linewidth: 3 });
+					const xAxis = new THREE.Line(xGeometry, xMaterial);
+					axesGroup.add(xAxis);
+
+					// Y-axis (Green)
+					const yGeometry = new THREE.BufferGeometry().setFromPoints([
+						new THREE.Vector3(0, 0, 0),
+						new THREE.Vector3(0, 100, 0)
+					]);
+					const yMaterial = new THREE.LineBasicMaterial({ color: 0x00ff00, linewidth: 3 });
+					const yAxis = new THREE.Line(yGeometry, yMaterial);
+					axesGroup.add(yAxis);
+
+					// Z-axis (Blue)
+					const zGeometry = new THREE.BufferGeometry().setFromPoints([
+						new THREE.Vector3(0, 0, 0),
+						new THREE.Vector3(0, 0, 100)
+					]);
+					const zMaterial = new THREE.LineBasicMaterial({ color: 0x0000ff, linewidth: 3 });
+					const zAxis = new THREE.Line(zGeometry, zMaterial);
+					axesGroup.add(zAxis);
+
+					// Add axis endpoint markers
+					const markerGeometry = new THREE.SphereGeometry(2, 8, 6);
+					
+					// X marker
+					const xMarker = new THREE.Mesh(markerGeometry, new THREE.MeshBasicMaterial({ color: 0xff0000 }));
+					xMarker.position.set(100, 0, 0);
+					axesGroup.add(xMarker);
+
+					// Y marker
+					const yMarker = new THREE.Mesh(markerGeometry, new THREE.MeshBasicMaterial({ color: 0x00ff00 }));
+					yMarker.position.set(0, 100, 0);
+					axesGroup.add(yMarker);
+
+					// Z marker
+					const zMarker = new THREE.Mesh(markerGeometry, new THREE.MeshBasicMaterial({ color: 0x0000ff }));
+					zMarker.position.set(0, 0, 100);
+					axesGroup.add(zMarker);
+
+					// Add text labels
+					const labelSize = 8;
+
+					// X label
+					const xLabelGeometry = new THREE.PlaneGeometry(labelSize, labelSize);
+					const xLabelMaterial = new THREE.MeshBasicMaterial({
+						map: createTextTexture('X', '#ff0000'),
+						transparent: true,
+						side: THREE.DoubleSide
+					});
+					const xLabel = new THREE.Mesh(xLabelGeometry, xLabelMaterial);
+					xLabel.position.set(110, 0, 0);
+					axesGroup.add(xLabel);
+
+					// Y label
+					const yLabelGeometry = new THREE.PlaneGeometry(labelSize, labelSize);
+					const yLabelMaterial = new THREE.MeshBasicMaterial({
+						map: createTextTexture('Y', '#00ff00'),
+						transparent: true,
+						side: THREE.DoubleSide
+					});
+					const yLabel = new THREE.Mesh(yLabelGeometry, yLabelMaterial);
+					yLabel.position.set(0, 110, 0);
+					axesGroup.add(yLabel);
+
+					// Z label
+					const zLabelGeometry = new THREE.PlaneGeometry(labelSize, labelSize);
+					const zLabelMaterial = new THREE.MeshBasicMaterial({
+						map: createTextTexture('Z', '#0000ff'),
+						transparent: true,
+						side: THREE.DoubleSide
+					});
+					const zLabel = new THREE.Mesh(zLabelGeometry, zLabelMaterial);
+					zLabel.position.set(0, 0, 110);
+					axesGroup.add(zLabel);
+
+					// Add origin label
+					const originLabelGeometry = new THREE.PlaneGeometry(labelSize, labelSize);
+					const originLabelMaterial = new THREE.MeshBasicMaterial({
+						map: createTextTexture('O', '#ffffff'),
+						transparent: true,
+						side: THREE.DoubleSide
+					});
+					const originLabel = new THREE.Mesh(originLabelGeometry, originLabelMaterial);
+					originLabel.position.set(-8, -8, 0);
+					axesGroup.add(originLabel);
+
+					// Add origin marker
+					const originMarker = new THREE.Mesh(
+						new THREE.SphereGeometry(3, 8, 6),
+						new THREE.MeshBasicMaterial({ color: 0xffffff })
+					);
+					originMarker.position.set(0, 0, 0);
+					axesGroup.add(originMarker);
+
+					return axesGroup;
+				}
+
+				const customAxes = createCoordinateAxes();
+				scene.add(customAxes);
+
 				//
 
 				const loader = new SVGLoader();
@@ -163,6 +300,134 @@
 
 					let renderOrder = 0;
 
+					// Parse and render clipPath elements
+					function parseAndRenderClipPaths() {
+						if ( !guiData.showClipPaths ) return;
+						
+						const xml = data.xml;
+						if ( !xml ) return;
+
+						const clipNodes = xml.querySelectorAll( 'clipPath' );
+						console.log('Found clipPath nodes:', clipNodes.length);
+
+						clipNodes.forEach( clip => {
+							const id = clip.getAttribute( 'id' );
+							if ( !id ) return;
+
+							console.log('Processing clipPath:', id);
+
+							// Create a group for this clipPath visualization
+							const clipGroup = new THREE.Group();
+
+							// Parse each element inside the clipPath
+							clip.childNodes.forEach( node => {
+								if ( node.nodeType === 1 ) { // Element node
+									console.log('ClipPath element:', node.tagName, node.attributes);
+
+									if ( node.tagName === 'rect' ) {
+										// Handle rect elements
+										const x = parseFloat( node.getAttribute( 'x' ) || '0' );
+										const y = parseFloat( node.getAttribute( 'y' ) || '0' );
+										const width = parseFloat( node.getAttribute( 'width' ) || '0' );
+										const height = parseFloat( node.getAttribute( 'height' ) || '0' );
+										const transform = node.getAttribute( 'transform' );
+
+										console.log(`Rect: x=${x}, y=${y}, width=${width}, height=${height}, transform=${transform}`);
+
+										// Create rectangle outline using LineLoop
+										const points = [
+											new THREE.Vector3( x, y, 0 ),
+											new THREE.Vector3( x + width, y, 0 ),
+											new THREE.Vector3( x + width, y + height, 0 ),
+											new THREE.Vector3( x, y + height, 0 )
+										];
+
+										const rectGeometry = new THREE.BufferGeometry().setFromPoints( points );
+										const rectMaterial = new THREE.LineBasicMaterial( {
+											color: 0xff0000, // Red color
+											linewidth: 3, // Make it more visible
+											transparent: true,
+											opacity: 1.0 // Full opacity for better visibility
+										} );
+
+										const rectLine = new THREE.LineLoop( rectGeometry, rectMaterial );
+										rectLine.position.set( 0, 0, 0.1 );
+										rectLine.renderOrder = renderOrder + 1000; // Ensure it's on top
+
+										// Apply transform if exists
+										if ( transform ) {
+											console.log('Applying transform:', transform);
+											// Simple scale transform parsing
+											const scaleMatch = transform.match(/scale\(([^)]+)\)/);
+											if ( scaleMatch ) {
+												const scaleParams = scaleMatch[1].split(',').map(s => parseFloat(s.trim()));
+												if ( scaleParams.length === 2 ) {
+													rectLine.scale.set( scaleParams[0], scaleParams[1], 1 );
+												} else if ( scaleParams.length === 1 ) {
+													rectLine.scale.setScalar( scaleParams[0] );
+												}
+											}
+										}
+
+										clipGroup.add( rectLine );
+
+									} else if ( node.tagName === 'path' ) {
+										// Handle path elements
+										const d = node.getAttribute( 'd' );
+										if ( d ) {
+											console.log('Path d:', d.substring(0, 100) + '...');
+
+											try {
+												// Create a temporary SVG to parse the path
+												const pathSvg = `<svg xmlns="http://www.w3.org/2000/svg"><path d="${d}"/></svg>`;
+												const pathData = loader.parse( pathSvg );
+
+												if ( pathData.paths && pathData.paths.length > 0 ) {
+													const path = pathData.paths[0];
+													
+													// Get path points for creating lines
+													for ( const subPath of path.subPaths ) {
+														const points = subPath.getPoints();
+														if ( points.length > 1 ) {
+															// Convert 2D points to 3D points
+															const points3D = points.map( p => new THREE.Vector3( p.x, p.y, 0 ) );
+															
+															const pathGeometry = new THREE.BufferGeometry().setFromPoints( points3D );
+															const pathMaterial = new THREE.LineBasicMaterial( {
+																color: 0xff0000, // Red color
+																linewidth: 3, // Make it more visible
+																transparent: true,
+																opacity: 1.0 // Full opacity for better visibility
+															} );
+
+															// Use LineLoop for closed paths, Line for open paths
+															const pathLine = subPath.closed ? 
+																new THREE.LineLoop( pathGeometry, pathMaterial ) :
+																new THREE.Line( pathGeometry, pathMaterial );
+															
+															pathLine.renderOrder = renderOrder + 1000; // Ensure it's on top
+															clipGroup.add( pathLine );
+														}
+													}
+												}
+											} catch ( error ) {
+												console.warn('Failed to parse clipPath path:', error);
+											}
+										}
+									}
+								}
+							} );
+
+							// Add the clipPath group to the main SVG group (not scene directly)
+							// This ensures it gets the same transformations as the SVG content
+							if ( clipGroup.children.length > 0 ) {
+								group.add( clipGroup ); // Add to group instead of scene
+								console.log(`Added clipPath ${id} with ${clipGroup.children.length} elements to SVG group`);
+							}
+						} );
+					}
+
+					// Process all SVG paths first
 					for ( const path of data.paths ) {
 
 						const fillColor = path.userData.style.fill;
@@ -223,6 +488,10 @@
 						}
 
 					}
+
+					// Add clipPath visualization after all SVG content is processed
+					// This ensures clipPath gets the same transformations as the SVG content
+					parseAndRenderClipPaths();
 
 					scene.add( group );
 

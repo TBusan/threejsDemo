@@ -1,0 +1,330 @@
+<!DOCTYPE html>
+<html>
+	<head>
+		<meta charset="utf-8" />
+		<title>Three.js 渲染D3.js等值线图</title>
+		<script src="https://d3js.org/d3.v7.min.js"></script>
+		<style>
+			body {
+				margin: 0;
+				overflow: hidden;
+			}
+			canvas {
+				display: block;
+			}
+			#info {
+				position: absolute;
+				top: 10px;
+				width: 100%;
+				text-align: center;
+				color: white;
+				font-family: Arial, sans-serif;
+			}
+			#controls {
+				position: absolute;
+				top: 40px;
+				left: 10px;
+				background: rgba(0, 0, 0, 0.5);
+				padding: 10px;
+				border-radius: 5px;
+				color: white;
+				font-family: Arial, sans-serif;
+			}
+			#colorScale {
+				margin-top: 10px;
+				width: 300px;
+				height: 30px;
+				position: relative;
+			}
+		</style>
+	</head>
+	<body>
+		<div id="info">D3等值线数据 + Three.js渲染</div>
+		<div id="container"></div>
+
+		<script type="importmap">
+			{
+				"imports": {
+					"three": "../../build/three.module.js",
+					"three/addons/": "../../examples/jsm/"
+				}
+			}
+		</script>
+		<script type="module">
+			import * as THREE from 'three';
+			import { GUI } from 'three/addons/libs/lil-gui.module.min.js';
+			import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+			import { SVGLoader } from 'three/addons/loaders/SVGLoader.js';
+			import { FontLoader } from 'three/addons/loaders/FontLoader.js';
+			import { TextGeometry } from 'three/addons/geometries/TextGeometry.js';
+			
+			let renderer, scene, camera, gui, guiData;
+			let font; // 字体加载后缓存
+			
+			init();
+			
+			function init() {
+				const container = document.getElementById('container');
+			
+				camera = new THREE.PerspectiveCamera(50, window.innerWidth / window.innerHeight, 0.1, 10000);
+				camera.position.set(0, 0, 200);
+			
+				renderer = new THREE.WebGLRenderer({ antialias: true });
+				renderer.setPixelRatio(window.devicePixelRatio);
+				renderer.setSize(window.innerWidth, window.innerHeight);
+				renderer.localClippingEnabled = true; // 开启局部裁剪
+				container.appendChild(renderer.domElement);
+			
+				const controls = new OrbitControls(camera, renderer.domElement);
+				controls.addEventListener('change', render);
+				controls.screenSpacePanning = true;
+			
+				window.addEventListener('resize', onWindowResize);
+			
+				guiData = {
+					currentURL: './nn.svg',
+					drawFillShapes: true,
+					drawStrokes: true,
+					fillShapesWireframe: false,
+					strokesWireframe: false
+				};
+			
+				// 先加载字体，再加载SVG
+				const fontLoader = new FontLoader();
+				fontLoader.load('https://threejs.org/examples/fonts/helvetiker_regular.typeface.json', f => {
+					font = f;
+					loadSVG(guiData.currentURL);
+				});
+			
+				createGUI();
+			}
+			
+			function createGUI() {
+				if (gui) gui.destroy();
+			
+				gui = new GUI();
+				gui.add(guiData, 'currentURL', {
+					'Tiger': './tiger.svg',
+					'Joins and caps': 'models/svg/lineJoinsAndCaps.svg',
+				}).name('SVG File').onChange(() => loadSVG(guiData.currentURL));
+				gui.add(guiData, 'drawStrokes').name('Draw strokes').onChange(() => loadSVG(guiData.currentURL));
+				gui.add(guiData, 'drawFillShapes').name('Draw fill shapes').onChange(() => loadSVG(guiData.currentURL));
+				gui.add(guiData, 'strokesWireframe').name('Wireframe strokes').onChange(() => loadSVG(guiData.currentURL));
+				gui.add(guiData, 'fillShapesWireframe').name('Wireframe fill shapes').onChange(() => loadSVG(guiData.currentURL));
+			}
+			
+			async function loadSVG(url) {
+				if (scene) disposeScene(scene);
+			
+				scene = new THREE.Scene();
+				scene.background = new THREE.Color(0xb0b0b0);
+			
+				const helper = new THREE.GridHelper(160, 10, 0x8d8d8d, 0xc1c1c1);
+				helper.rotation.x = Math.PI / 2;
+				scene.add(helper);
+			
+				// 获取原始SVG文本
+				const svgText = await fetch(url).then(r => r.text());
+				const parser = new DOMParser();
+				const svgDoc = parser.parseFromString(svgText, 'image/svg+xml');
+			
+				const loader = new SVGLoader();
+				const data = loader.parse(svgText);
+			
+				const group = new THREE.Group();
+				// group.scale.multiplyScalar(0.25);
+				group.scale.y *= -1;
+			
+				let renderOrder = 0;
+			
+				// 1. 解析并渲染 path 形状
+				for (const path of data.paths) {
+					const fillColor = path.userData.style.fill;
+					if (guiData.drawFillShapes && fillColor !== undefined && fillColor !== 'none') {
+						const material = new THREE.MeshBasicMaterial({
+							color: new THREE.Color().setStyle(fillColor),
+							opacity: path.userData.style.fillOpacity,
+							transparent: true,
+							side: THREE.DoubleSide,
+							depthWrite: false,
+							wireframe: guiData.fillShapesWireframe
+						});
+						const shapes = SVGLoader.createShapes(path);
+						for (const shape of shapes) {
+							const geometry = new THREE.ShapeGeometry(shape);
+							const mesh = new THREE.Mesh(geometry, material);
+							mesh.renderOrder = renderOrder++;
+							group.add(mesh);
+						}
+					}
+			
+					const strokeColor = path.userData.style.stroke;
+					if (guiData.drawStrokes && strokeColor !== undefined && strokeColor !== 'none') {
+						const material = new THREE.MeshBasicMaterial({
+							color: new THREE.Color().setStyle(strokeColor),
+							opacity: path.userData.style.strokeOpacity,
+							transparent: true,
+							side: THREE.DoubleSide,
+							depthWrite: false,
+							wireframe: guiData.strokesWireframe
+						});
+						for (const subPath of path.subPaths) {
+							const geometry = SVGLoader.pointsToStroke(subPath.getPoints(), path.userData.style);
+							if (geometry) {
+								const mesh = new THREE.Mesh(geometry, material);
+								mesh.renderOrder = renderOrder++;
+								group.add(mesh);
+							}
+						}
+					}
+				}
+			
+				// 2. 解析并渲染 <text>
+				const textElements = svgDoc.querySelectorAll('text');
+				textElements.forEach(el => {
+					const textValue = el.textContent.trim();
+					if (!textValue) return;
+					const x = parseFloat(el.getAttribute('x') || 0);
+					const y = parseFloat(el.getAttribute('y') || 0);
+					const fontSize = parseFloat(el.getAttribute('font-size') || 16);
+					const fill = el.getAttribute('fill') || '#000';
+					const geo = new TextGeometry(textValue, {
+						font: font,
+						size: fontSize,
+						height: 0,
+					});
+					const mat = new THREE.MeshBasicMaterial({ color: new THREE.Color(fill) });
+					const mesh = new THREE.Mesh(geo, mat);
+					mesh.position.set(x, y, 0); // 注意Y轴翻转
+					group.add(mesh);
+				});
+			
+				// // 3. 解析并应用 clipPath
+				// const clipPaths = svgDoc.querySelectorAll('clipPath');
+				// const clipPlanes = [];
+				// clipPaths.forEach(cp => {
+				// 	const shapes = [];
+				// 	cp.querySelectorAll('path').forEach(pathEl => {
+				// 		const subData = loader.parse(pathEl.outerHTML);
+				// 		subData.paths.forEach(p => {
+				// 			shapes.push(...SVGLoader.createShapes(p));
+				// 		});
+				// 	});
+				// 	shapes.forEach(shape => {
+				// 		// 这里只示例使用平面裁剪，实际SVG clipPath更复杂
+				// 		const box = new THREE.Box3().setFromPoints(shape.getPoints());
+				// 		const plane = new THREE.Plane(new THREE.Vector3(0, 0, 1), -box.max.z);
+				// 		clipPlanes.push(plane);
+				// 	});
+				// });
+			
+				// // 应用 clipPath 到所有mesh
+				// if (clipPlanes.length > 0) {
+				// 	group.traverse(o => {
+				// 		if (o.isMesh) {
+				// 			o.material.clippingPlanes = clipPlanes;
+				// 			o.material.clipIntersection = true;
+				// 		}
+				// 	});
+				// }
+
+
+// 				// 3. 解析 clipPath 并渲染成红色线条
+// const clipPaths = svgDoc.querySelectorAll('clipPath');
+// clipPaths.forEach(cp => {
+//     cp.querySelectorAll('path').forEach(pathEl => {
+//         const subData = loader.parse(pathEl.outerHTML);
+//         subData.paths.forEach(p => {
+//             const shapes = SVGLoader.createShapes(p);
+//             shapes.forEach(shape => {
+//                 const points = shape.getPoints();
+//                 const geometry = new THREE.BufferGeometry().setFromPoints(points);
+//                 const material = new THREE.LineBasicMaterial({ color: 0xff0000 });
+//                 const line = new THREE.LineLoop(geometry, material);
+//                 group.add(line);
+//             });
+//         });
+//     });
+// });
+
+
+// 渲染 clipPath 轮廓为红色线条
+const clipPaths = svgDoc.querySelectorAll('clipPath');
+clipPaths.forEach(cp => {
+    const clipId = cp.getAttribute('id');
+    if (!clipId) return;
+
+    // 找到引用这个 clipPath 的目标元素
+    const targets = svgDoc.querySelectorAll(`[clip-path="url(#${clipId})"]`);
+
+    targets.forEach(targetEl => {
+        const units = cp.getAttribute('clipPathUnits') || 'userSpaceOnUse';
+
+        cp.querySelectorAll('path').forEach(pathEl => {
+            // 用 SVGLoader 解析 clipPath path
+            const subData = loader.parse(pathEl.outerHTML);
+            subData.paths.forEach(p => {
+                let shapes = SVGLoader.createShapes(p);
+
+                // 如果是 objectBoundingBox，需要按目标元素的 bbox 缩放平移
+                if (units === 'objectBoundingBox') {
+                    const bbox = targetEl.getBBox();
+                    shapes = shapes.map(shape => {
+                        const pts = shape.getPoints();
+                        pts.forEach(pt => {
+                            pt.x = bbox.x + pt.x * bbox.width;
+                            pt.y = bbox.y + pt.y * bbox.height;
+                        });
+                        const newShape = new THREE.Shape();
+                        newShape.setFromPoints(pts);
+                        return newShape;
+                    });
+                }
+
+                // 渲染成红色线条
+                shapes.forEach(shape => {
+                    const points = shape.getPoints();
+                    const geometry = new THREE.BufferGeometry().setFromPoints(points);
+                    const material = new THREE.LineBasicMaterial({ color: 0xff0000 });
+                    const line = new THREE.LineLoop(geometry, material);
+
+                    // 让 clipPath 跟 path 使用相同的缩放和 Y 翻转
+                    // line.scale.multiplyScalar(0.25);
+                    // line.scale.y *= -1;
+
+                    group.add(line);
+                });
+            });
+        });
+    });
+});
+
+
+			
+				scene.add(group);
+				render();
+			}
+			
+			function onWindowResize() {
+				camera.aspect = window.innerWidth / window.innerHeight;
+				camera.updateProjectionMatrix();
+				renderer.setSize(window.innerWidth, window.innerHeight);
+				render();
+			}
+			
+			function render() {
+				renderer.render(scene, camera);
+			}
+			
+			function disposeScene(scene) {
+				scene.traverse(function (object) {
+					if (object.isMesh || object.isLine) {
+						object.geometry.dispose();
+						object.material.dispose();
+					}
+				});
+			}
+			</script>
+			
+	</body>
+</html>

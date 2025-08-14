@@ -114,6 +114,7 @@
 
 					'nn': './nn.svg',
 					'mm': './mm.svg',
+					'Test Text & Clip': './test-text-clip.svg',
 				} ).name( 'SVG File' ).onChange( update );
 
 				gui.add( guiData, 'drawStrokes' ).name( 'Draw strokes' ).onChange( update );
@@ -157,15 +158,198 @@
 
 					const group = new THREE.Group();
 					group.scale.multiplyScalar( 0.25 );
-					// group.position.x = - 70;
-					// group.position.y = 70;
 					group.scale.y *= - 1;
 
 					let renderOrder = 0;
 
+					// Parse clipPath elements from the SVG XML
+					const clipPathMap = new Map();
+					let clipRefCounter = 1;
+
+					const xml = data.xml;
+					if ( xml ) {
+						const serializer = new XMLSerializer();
+						const clipNodes = xml.querySelectorAll( 'clipPath' );
+						debugger
+						clipNodes.forEach( clip => {
+							const id = clip.getAttribute( 'id' );
+							if ( ! id ) return;
+							
+							let content = '';
+							clip.childNodes.forEach( node => {
+								if ( node.nodeType === 1 ) content += serializer.serializeToString( node );
+							} );
+							
+							const transform = clip.getAttribute( 'transform' );
+							if ( content ) {
+								const wrapped = transform ? `<g transform="${ transform }">${ content }</g>` : content;
+								const parsed = loader.parse( `<svg xmlns="http://www.w3.org/2000/svg">${ wrapped }</svg>` );
+								clipPathMap.set( id, parsed.paths );
+							} else {
+								clipPathMap.set( id, [] );
+							}
+						} );
+					}
+
+					// Helper functions for clipPath
+					function createClipRun( clipId ) {
+						const paths = clipPathMap.get( clipId );
+						const wrapper = new THREE.Group();
+						const clipped = new THREE.Group();
+						let ref = clipRefCounter++;
+						if ( clipRefCounter > 255 ) clipRefCounter = 1;
+
+						if ( paths && paths.length ) {
+							const maskGroup = new THREE.Group();
+							
+							// Sentinel to clear stencil
+							const sentinel = new THREE.Mesh( 
+								new THREE.PlaneGeometry( 1e-9, 1e-9 ), 
+								new THREE.MeshBasicMaterial( { 
+									colorWrite: false, 
+									depthTest: false, 
+									depthWrite: false, 
+									visible: false 
+								} ) 
+							);
+							sentinel.renderOrder = renderOrder++;
+							sentinel.onBeforeRender = ( renderer ) => { renderer.clearStencil(); };
+							maskGroup.add( sentinel );
+
+							// Create mask geometry
+							for ( const p of paths ) {
+								const shapes = SVGLoader.createShapes( p );
+								for ( const shape of shapes ) {
+									const geom = new THREE.ShapeGeometry( shape );
+									const mat = new THREE.MeshBasicMaterial( { 
+										colorWrite: false, 
+										depthTest: false, 
+										depthWrite: false 
+									} );
+									mat.stencilWrite = true;
+									mat.stencilRef = ref;
+									mat.stencilFunc = THREE.AlwaysStencilFunc;
+									mat.stencilZPass = THREE.ReplaceStencilOp;
+									mat.stencilZFail = THREE.ReplaceStencilOp;
+									mat.stencilFail = THREE.ReplaceStencilOp;
+									
+									const m = new THREE.Mesh( geom, mat );
+									m.renderOrder = renderOrder++;
+									maskGroup.add( m );
+								}
+							}
+							wrapper.add( maskGroup );
+						}
+
+						wrapper.add( clipped );
+						group.add( wrapper );
+
+						return { wrapper, clipped, ref };
+					}
+
+					function findClipAttr( node ) {
+						let n = node;
+						while ( n && n.getAttribute ) {
+							const v = n.getAttribute( 'clip-path' );
+							if ( v ) return v;
+							n = n.parentNode;
+						}
+						return null;
+					}
+
+					// Parse text elements from SVG XML
+					function parseTextElements() {
+						if ( ! xml ) return;
+						
+						const textNodes = xml.querySelectorAll( 'text' );
+						textNodes.forEach( textNode => {
+							const text = textNode.textContent || '';
+							if ( ! text.trim() ) return;
+
+							// Get text attributes
+							const x = parseFloat( textNode.getAttribute( 'x' ) || '0' );
+							const y = parseFloat( textNode.getAttribute( 'y' ) || '0' );
+							const fontSize = parseFloat( textNode.getAttribute( 'font-size' ) || '16' );
+							const fill = textNode.getAttribute( 'fill' ) || '#000000';
+							const fontFamily = textNode.getAttribute( 'font-family' ) || 'Arial';
+
+							// Create text geometry using canvas
+							const canvas = document.createElement( 'canvas' );
+							const context = canvas.getContext( '2d' );
+							context.font = `${ fontSize }px ${ fontFamily }`;
+							const metrics = context.measureText( text );
+							
+							canvas.width = Math.ceil( metrics.width );
+							canvas.height = Math.ceil( fontSize * 1.5 );
+							
+							context.font = `${ fontSize }px ${ fontFamily }`;
+							context.fillStyle = fill;
+							context.textBaseline = 'top';
+							context.fillText( text, 0, 0 );
+
+							// Create texture from canvas
+							const texture = new THREE.CanvasTexture( canvas );
+							texture.needsUpdate = true;
+
+							// Create plane geometry for text
+							const textGeometry = new THREE.PlaneGeometry( canvas.width, canvas.height );
+							const textMaterial = new THREE.MeshBasicMaterial( { 
+								map: texture, 
+								transparent: true,
+								side: THREE.DoubleSide
+							} );
+
+							const textMesh = new THREE.Mesh( textGeometry, textMaterial );
+							textMesh.position.set( x + canvas.width / 2, y - canvas.height / 2, 0.1 );
+							textMesh.renderOrder = renderOrder++;
+
+							// Check for clipPath
+							const clipAttr = findClipAttr( textNode );
+							if ( clipAttr ) {
+								const clipId = clipAttr.replace( /^url\(#/, '' ).replace( /\)$/, '' );
+								const clipBundle = createClipRun( clipId );
+								
+								// Apply stencil test to text material
+								textMaterial.stencilWrite = true;
+								textMaterial.stencilWriteMask = 0x00;
+								textMaterial.stencilFunc = THREE.EqualStencilFunc;
+								textMaterial.stencilRef = clipBundle.ref;
+								textMaterial.stencilFail = THREE.KeepStencilOp;
+								textMaterial.stencilZFail = THREE.KeepStencilOp;
+								textMaterial.stencilZPass = THREE.KeepStencilOp;
+								
+								clipBundle.clipped.add( textMesh );
+							} else {
+								group.add( textMesh );
+							}
+						} );
+					}
+
+					let currentClipId = null;
+					let currentBundle = null;
+
 					for ( const path of data.paths ) {
 
 						const fillColor = path.userData.style.fill;
+						const clipAttr = findClipAttr( path.userData.node );
+						let parentForMeshes = group;
+						let activeRef = 0;
+						let clipId = null;
+						
+						if ( clipAttr ) {
+							clipId = clipAttr.replace( /^url\(#/, '' ).replace( /\)$/, '' );
+							if ( clipId !== currentClipId ) {
+								currentBundle = createClipRun( clipId );
+								currentClipId = clipId;
+							}
+							if ( currentBundle ) { 
+								parentForMeshes = currentBundle.clipped; 
+								activeRef = currentBundle.ref; 
+							}
+						} else {
+							currentBundle = null;
+							currentClipId = null;
+						}
 
 						if ( guiData.drawFillShapes && fillColor !== undefined && fillColor !== 'none' ) {
 
@@ -178,6 +362,17 @@
 								wireframe: guiData.fillShapesWireframe
 							} );
 
+							// Apply stencil test if clipped
+							if ( activeRef ) {
+								material.stencilWrite = true;
+								material.stencilWriteMask = 0x00;
+								material.stencilFunc = THREE.EqualStencilFunc;
+								material.stencilRef = activeRef;
+								material.stencilFail = THREE.KeepStencilOp;
+								material.stencilZFail = THREE.KeepStencilOp;
+								material.stencilZPass = THREE.KeepStencilOp;
+							}
+
 							const shapes = SVGLoader.createShapes( path );
 
 							for ( const shape of shapes ) {
@@ -186,7 +381,7 @@
 								const mesh = new THREE.Mesh( geometry, material );
 								mesh.renderOrder = renderOrder ++;
 
-								group.add( mesh );
+								parentForMeshes.add( mesh );
 
 							}
 
@@ -205,6 +400,17 @@
 								wireframe: guiData.strokesWireframe
 							} );
 
+							// Apply stencil test if clipped
+							if ( activeRef ) {
+								material.stencilWrite = true;
+								material.stencilWriteMask = 0x00;
+								material.stencilFunc = THREE.EqualStencilFunc;
+								material.stencilRef = activeRef;
+								material.stencilFail = THREE.KeepStencilOp;
+								material.stencilZFail = THREE.KeepStencilOp;
+								material.stencilZPass = THREE.KeepStencilOp;
+							}
+
 							for ( const subPath of path.subPaths ) {
 
 								const geometry = SVGLoader.pointsToStroke( subPath.getPoints(), path.userData.style );
@@ -214,7 +420,7 @@
 									const mesh = new THREE.Mesh( geometry, material );
 									mesh.renderOrder = renderOrder ++;
 
-									group.add( mesh );
+									parentForMeshes.add( mesh );
 
 								}
 
@@ -223,6 +429,9 @@
 						}
 
 					}
+
+					// Parse and add text elements
+					parseTextElements();
 
 					scene.add( group );
 
